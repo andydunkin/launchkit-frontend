@@ -7,6 +7,7 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitted(true)
+    console.log("Prompt:", prompt);
     console.log("Submitting to API:", process.env.NEXT_PUBLIC_API_URL);
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects`, {
       method: 'POST',
@@ -17,12 +18,15 @@ export default function Home() {
         subdomain: `app-${Date.now()}`
       }),
     })
+    const projectResText = await res.clone().text();
+    console.log("Project API response:", projectResText);
     if (!res.ok) {
       console.error("Failed to create project", await res.text());
       alert("Error creating project.");
       return;
     }
     const project = await res.json()
+    console.log("Parsed project:", project);
 
     const promptRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/prompts`, {
       method: 'POST',
@@ -33,6 +37,8 @@ export default function Home() {
         response: {}
       }),
     })
+    const promptResText = await promptRes.clone().text();
+    console.log("Prompt API response:", promptResText);
     if (!promptRes.ok) {
       console.error("Failed to submit prompt", await promptRes.text());
       alert("Error submitting prompt.");
@@ -40,6 +46,7 @@ export default function Home() {
     }
 
     alert('Prompt submitted! Check dashboard.')
+    console.log("Prompt submission completed.");
   }
 
   return (
