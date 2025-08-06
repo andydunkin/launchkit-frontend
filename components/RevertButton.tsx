@@ -17,8 +17,12 @@ const RevertButton: React.FC<RevertButtonProps> = ({ projectId }) => {
     try {
       const response = await axios.post(`/deployments/${projectId}/revert`);
       setMessage(response.data.message || "Revert successful.");
-    } catch (error: any) {
-      setMessage(error.response?.data?.error || "Failed to revert.");
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        setMessage(error.response?.data?.error || "Failed to revert.");
+      } else {
+        setMessage("An unexpected error occurred.");
+      }
     } finally {
       setLoading(false);
     }
