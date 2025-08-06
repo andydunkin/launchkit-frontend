@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import RevertOverlay from '../components/RevertOverlay';
 
 export default function Dashboard() {
   const [projects, setProjects] = useState([])
@@ -18,7 +19,7 @@ export default function Dashboard() {
 
   return (
     <main className="p-8">
-      <h1 className="text-2xl font-bold mb-4">Your Projects</h1>
+      <h1 className="text-2xl font-bold mb-4">Project Dashboard</h1>
       <ul className="space-y-4">
         {projects.map((proj: Project) => (
           <li key={proj.id} className="p-4 border rounded">
@@ -28,6 +29,7 @@ export default function Dashboard() {
           </li>
         ))}
       </ul>
+      <RevertOverlay message="Project dashboard updated. Revert available." />
     </main>
   )
 }
