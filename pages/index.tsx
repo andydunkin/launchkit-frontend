@@ -28,11 +28,22 @@ export default function Home() {
     const project = await res.json()
     console.log("Parsed project:", project);
 
+    let projectId;
+    if (Array.isArray(project) && project.length > 0 && project[0].id) {
+      projectId = project[0].id;
+    } else if (project?.id) {
+      projectId = project.id;
+    } else {
+      console.error("Unexpected project response structure:", project);
+      alert("Error: Could not determine project ID from response.");
+      return;
+    }
+
     const promptRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/prompts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        project_id: project[0].id,
+        project_id: projectId,
         content: prompt,
         response: {}
       }),
