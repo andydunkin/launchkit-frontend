@@ -32,8 +32,8 @@ export default function Home() {
 
     let projectId;
     try {
-      if (project?.project?.subdomain) {
-        projectId = project.project.subdomain;
+      if (project?.project?.id) {
+        projectId = project.project.id;
       } else {
         throw new Error("Unexpected project response format");
       }
