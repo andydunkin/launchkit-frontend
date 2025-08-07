@@ -24,8 +24,12 @@ export default function ProjectFilesPage() {
       if (!res.ok) throw new Error(`List failed: ${res.status}`);
       const data = await res.json();
       setFiles(Array.isArray(data) ? data : []);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load files");
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        setError(e.message);
+      } else {
+        setError("Failed to load files");
+      }
     } finally {
       setLoading(false);
     }
@@ -41,8 +45,12 @@ export default function ProjectFilesPage() {
       if (!res.ok) throw new Error(`Get file failed: ${res.status}`);
       const data = (await res.json()) as FileDetail;
       setSelected(data);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load file");
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        setError(e.message);
+      } else {
+        setError("Failed to load file");
+      }
     }
   };
 

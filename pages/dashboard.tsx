@@ -9,13 +9,23 @@ interface Project {
   subdomain: string
 }
 
+const API = process.env.NEXT_PUBLIC_API_URL
+
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState<boolean>(false)
+  const [creating, setCreating] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
 
-  const API = process.env.NEXT_PUBLIC_API_URL
   const APPS_DOMAIN = 'launching.stratxi.com' // wildcard domain for user apps
+
+  const apiHost = (() => {
+    try {
+      return API ? new URL(API).host : 'not set'
+    } catch {
+      return API || 'not set'
+    }
+  })()
 
   const load = async () => {
     if (!API) {
@@ -27,19 +37,19 @@ export default function Dashboard() {
     try {
       const res = await fetch(`${API}/projects/demo-user-id`)
       if (!res.ok) throw new Error(`API ${res.status}`)
-      const data = await res.json()
-      // backend may return a single object or an array; normalize to array
+      const data: Project[] | Project | null = await res.json()
       const list: Project[] = Array.isArray(data) ? data : (data ? [data] : [])
       setProjects(list)
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load projects')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to load projects'
+      setError(msg)
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    load()
+    void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -48,13 +58,13 @@ export default function Dashboard() {
       setError('NEXT_PUBLIC_API_URL is not set')
       return
     }
-    setLoading(true)
+    setCreating(true)
     setError(null)
     const timestamp = Date.now()
     const newProject = {
       user_id: 'demo-user-id',
       name: `app-${timestamp}`,
-      subdomain: `app-${timestamp}`
+      subdomain: `app-${timestamp}`,
     }
     try {
       const res = await fetch(`${API}/projects`, {
@@ -62,12 +72,17 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProject),
       })
-      if (!res.ok) throw new Error(`API ${res.status}`)
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '')
+        throw new Error(`API ${res.status} ${txt}`)
+      }
       await load()
-    } catch (e: any) {
-      setError(e?.message || 'Failed to create project')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to create project'
+      setError(msg)
+      alert(msg)
     } finally {
-      setLoading(false)
+      setCreating(false)
     }
   }
 
@@ -75,15 +90,25 @@ export default function Dashboard() {
     <main className="p-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Project Dashboard</h1>
-        <button
-          onClick={createProject}
-          disabled={loading}
-          className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Create Project
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            className="px-3 py-2 rounded border hover:bg-gray-50"
+          >
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <button
+            onClick={() => void createProject()}
+            disabled={creating}
+            className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {creating ? 'Creating…' : 'Create Project'}
+          </button>
+        </div>
       </div>
-      <div className="text-sm text-gray-500 mb-6">API: {API ? new URL(API).host : 'not set'}</div>
+
+      <div className="text-sm text-gray-500 mb-6">API: {apiHost}</div>
 
       {loading && <div className="text-gray-600 mb-4">Loading…</div>}
       {error && <div className="text-red-600 mb-4">Error: {error}</div>}
