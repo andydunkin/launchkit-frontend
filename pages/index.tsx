@@ -32,12 +32,8 @@ export default function Home() {
 
     let projectId;
     try {
-      if (project?.project?.id) {
-        projectId = project.project.id;
-      } else if (Array.isArray(project) && project.length > 0 && project[0].id) {
-        projectId = project[0].id;
-      } else if (project?.id) {
-        projectId = project.id;
+      if (project?.project?.subdomain) {
+        projectId = project.project.subdomain;
       } else {
         throw new Error("Unexpected project response format");
       }
