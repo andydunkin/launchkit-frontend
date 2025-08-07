@@ -26,6 +26,7 @@ export default function Home() {
       return;
     }
     const project = await res.json()
+    console.log("Full project response object:", project);
     console.log("Parsed project:", project);
 
     let projectId;
