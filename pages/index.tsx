@@ -27,15 +27,18 @@ export default function Home() {
     }
     const project = await res.json()
     console.log("Full project response object:", project);
-    console.log("Parsed project:", project);
 
     let projectId;
-    if (Array.isArray(project) && project.length > 0 && project[0].id) {
-      projectId = project[0].id;
-    } else if (project?.id) {
-      projectId = project.id;
-    } else {
-      console.error("Unexpected project response structure:", project);
+    try {
+      if (Array.isArray(project) && project.length > 0 && project[0].id) {
+        projectId = project[0].id;
+      } else if (project?.id) {
+        projectId = project.id;
+      } else {
+        throw new Error("Unexpected project response format");
+      }
+    } catch (err) {
+      console.error("Error determining project ID:", err, project);
       alert("Error: Could not determine project ID from response.");
       return;
     }
