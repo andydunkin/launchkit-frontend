@@ -9,13 +9,15 @@ export default function Home() {
     setSubmitted(true)
     console.log("Prompt:", prompt);
     console.log("Submitting to API:", process.env.NEXT_PUBLIC_API_URL);
+    const timestamp = Date.now();
+    const subdomain = `app-${timestamp}`;
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         user_id: 'demo-user-id',
-        name: 'Generated App',
-        subdomain: `app-${Date.now()}`
+        name: subdomain,
+        subdomain
       }),
     })
     const projectResText = await res.clone().text();
