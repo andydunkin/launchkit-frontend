@@ -30,7 +30,9 @@ export default function Home() {
 
     let projectId;
     try {
-      if (Array.isArray(project) && project.length > 0 && project[0].id) {
+      if (project?.project?.id) {
+        projectId = project.project.id;
+      } else if (Array.isArray(project) && project.length > 0 && project[0].id) {
         projectId = project[0].id;
       } else if (project?.id) {
         projectId = project.id;
