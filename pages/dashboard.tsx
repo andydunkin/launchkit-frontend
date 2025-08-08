@@ -7,6 +7,7 @@ interface Project {
   name: string
   status: string
   subdomain: string
+  no_files_generated?: boolean
 }
 
 const API = process.env.NEXT_PUBLIC_API_URL
@@ -35,7 +36,7 @@ export default function Dashboard() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API}/projects/demo-user-id`)
+      const res = await fetch(`${API}/projects?user_id=demo-user-id`)
       if (!res.ok) throw new Error(`API ${res.status}`)
       const data: Project[] | Project | null = await res.json()
       const list: Project[] = Array.isArray(data) ? data : (data ? [data] : [])
