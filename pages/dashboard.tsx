@@ -128,6 +128,11 @@ export default function Dashboard() {
                   <h2 className="text-lg font-semibold">{proj.name}</h2>
                   <p className="text-sm text-gray-600">Status: {proj.status}</p>
                   <p className="text-sm text-gray-600">Subdomain: {proj.subdomain}</p>
+                  {proj.no_files_generated && (
+                    <p className="text-sm text-yellow-600">
+                      ⚠️ Last generation produced no files — try clarifying your request.
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   {/* View generated files */}
