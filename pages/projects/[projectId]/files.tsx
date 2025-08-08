@@ -14,6 +14,28 @@ export default function ProjectFilesPage() {
   const [files, setFiles] = useState<FileRow[]>([]);
   const [selected, setSelected] = useState<FileDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [publishMessage, setPublishMessage] = useState<string | null>(null);
+
+  const handlePublish = async () => {
+    if (!projectId || !API) return;
+    setPublishing(true);
+    setPublishMessage(null);
+    try {
+      const res = await fetch(`${API}/projects/${projectId}/publish`, { method: "POST" });
+      if (!res.ok) throw new Error(`Publish failed: ${res.status}`);
+      const data = await res.json();
+      setPublishMessage(data.message || "Publish successful");
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        setPublishMessage(`Error: ${e.message}`);
+      } else {
+        setPublishMessage("Publish failed");
+      }
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   const fetchFiles = async () => {
     if (!projectId || !API) return;
@@ -76,6 +98,14 @@ export default function ProjectFilesPage() {
         >
           {loading ? "Loading…" : "Refresh"}
         </button>
+        <button
+          onClick={handlePublish}
+          className="px-3 py-2 rounded bg-green-600 text-white hover:bg-green-700"
+          disabled={publishing || !projectId}
+        >
+          {publishing ? "Publishing…" : "Publish"}
+        </button>
+        {publishMessage && <div className="text-sm text-gray-600">{publishMessage}</div>}
         {error && <div className="text-red-600 text-sm">Error: {error}</div>}
       </div>
 
