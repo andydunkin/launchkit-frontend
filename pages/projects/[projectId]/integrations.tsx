@@ -3,7 +3,7 @@
 // pages/integrations.tsx
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import IntegrationForms from "../components/IntegrationForms";
+import IntegrationForms from "../../../components/IntegrationForms";
 
 export default function IntegrationsPage() {
   const router = useRouter();
