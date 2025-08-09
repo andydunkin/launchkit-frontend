@@ -37,9 +37,6 @@ export default function Home() {
     []
   )
 
-  useEffect(() => {
-    console.log('LaunchKit FRONTEND using API (sanitized):', API_BASE)
-  }, [API_BASE])
 
   const extractProjectId = (obj: ProjectResponse): string | undefined => {
     if (!obj) return undefined
@@ -71,10 +68,8 @@ export default function Home() {
       const timestamp = Date.now()
       const subdomain = `app-${timestamp}`
 
-      console.log('Submitting to API:', API_BASE)
-
       // 1) Create a project
-      const res = await fetch(`${API_BASE}/projects`, {
+      const res = await fetch(`${API_BASE}/projects/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -85,7 +80,6 @@ export default function Home() {
       })
 
       const projectResText = await res.clone().text()
-      console.log('Project API response:', projectResText)
 
       if (!res.ok) {
         throw new Error(`Project create failed (${res.status})`)
@@ -95,12 +89,12 @@ export default function Home() {
       const projectId = extractProjectId(projectObj)
 
       if (!projectId) {
-        console.error('Unexpected project response:', projectObj)
+        /* swallow console output to satisfy lint in production */
         throw new Error('Could not determine project ID from response.')
       }
 
       // 2) Send the initial prompt
-      const promptRes = await fetch(`${API_BASE}/prompts`, {
+      const promptRes = await fetch(`${API_BASE}/prompts/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -111,7 +105,6 @@ export default function Home() {
       })
 
       const promptResText = await promptRes.clone().text()
-      console.log('Prompt API response:', promptResText)
 
       if (!promptRes.ok) {
         throw new Error(`Prompt submit failed (${promptRes.status})`)
@@ -124,10 +117,10 @@ export default function Home() {
       }, 2500)
     } catch (err: unknown) {
       if (err instanceof Error) {
-        console.error('Submit error:', err)
+        /* swallow console output to satisfy lint in production */
         alert(err.message)
       } else {
-        console.error('Submit error:', err)
+        /* swallow console output to satisfy lint in production */
         alert('Something went wrong. Please try again.')
       }
       setSubmitted(false)
