@@ -1,97 +1,140 @@
 
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
-type IntegrationField = {
-  name: string;
-  label: string;
-  type: string;
-  required: boolean;
-};
+// ------------------------
+// Types
+// ------------------------
 
-type Integration = {
-  id: string;
-  name: string;
-  fields: IntegrationField[];
-};
+type FieldType = "text" | "password" | "number" | "boolean" | "email" | "url";
 
-type RegistryResponse = Integration[];
+interface SchemaProperty {
+  title?: string;
+  type?: string;
+  secret?: boolean; // if true, render as password & mask when displaying
+}
 
-type FormState = {
+interface IntegrationSchema {
+  properties?: Record<string, SchemaProperty>;
+  required?: string[];
+}
+
+interface IntegrationDef {
+  id?: string; // optional in case registry doesn't return an id
+  slug: string; // e.g., "stripe"
+  name: string; // e.g., "Stripe"
+  schema?: IntegrationSchema; // JSON schema-style description of fields
+  // Optional pre-flattened fields array (if you decide to store it)
+  fields?: Array<{ name: string; label: string; type?: FieldType; required?: boolean }>;
+}
+
+interface FormState {
   [fieldName: string]: string;
-};
+}
 
-type FormErrors = {
+interface FormErrors {
   [fieldName: string]: string;
-};
+}
 
-type Alert = {
+interface Alert {
   type: "success" | "error";
   message: string;
-};
+}
 
-// Dummy user ID for demonstration; replace as needed
-const USER_ID = "current_user_id";
+interface Props {
+  projectId: string; // required to post to /projects/{projectId}/integrations/{slug}
+  apiBase?: string; // default: process.env.NEXT_PUBLIC_API_URL or ""
+}
 
-const IntegrationForms: React.FC = () => {
-  const [registry, setRegistry] = useState<Integration[]>([]);
+// ------------------------
+// Helpers
+// ------------------------
+
+function schemaToFields(def: IntegrationDef): Array<{ name: string; label: string; type: FieldType; required: boolean }> {
+  if (def.fields && def.fields.length > 0) {
+    return def.fields.map((f) => ({
+      name: f.name,
+      label: f.label,
+      type: (f.type as FieldType) || "text",
+      required: Boolean(f.required),
+    }));
+  }
+  const props = def.schema?.properties ?? {};
+  const required = new Set(def.schema?.required ?? []);
+  return Object.entries(props).map(([key, meta]) => ({
+    name: key,
+    label: meta.title ?? key,
+    type: (meta.secret ? "password" : (meta.type as FieldType)) || "text",
+    required: required.has(key),
+  }));
+}
+
+// ------------------------
+// Component
+// ------------------------
+
+const IntegrationForms: React.FC<Props> = ({ projectId, apiBase }) => {
+  const baseUrl = useMemo(() => apiBase || process.env.NEXT_PUBLIC_API_URL || "", [apiBase]);
+
+  const [registry, setRegistry] = useState<IntegrationDef[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [expanded, setExpanded] = useState<{ [id: string]: boolean }>({});
-  const [formStates, setFormStates] = useState<{ [integrationId: string]: FormState }>({});
-  const [formErrors, setFormErrors] = useState<{ [integrationId: string]: FormErrors }>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({}); // key by slug
+  const [env, setEnv] = useState<"dev" | "prod">("prod");
+  const [formStates, setFormStates] = useState<Record<string, FormState>>({}); // key by slug
+  const [formErrors, setFormErrors] = useState<Record<string, FormErrors>>({}); // key by slug
   const [alert, setAlert] = useState<Alert | null>(null);
 
+  // Load available integrations from registry
   useEffect(() => {
     const fetchRegistry = async () => {
       setLoading(true);
       try {
-        const resp = await fetch("/integrations/registry");
-        if (!resp.ok) throw new Error("Failed to fetch integrations registry.");
-        const data: RegistryResponse = await resp.json();
+        const url = `${baseUrl}/integrations`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Failed to fetch integrations registry (HTTP ${resp.status}).`);
+        const data: IntegrationDef[] = await resp.json();
         setRegistry(data);
-        // Initialize form states
-        const initialStates: { [integrationId: string]: FormState } = {};
-        data.forEach((integration) => {
+        // initialize form states per slug from schema
+        const initial: Record<string, FormState> = {};
+        data.forEach((def) => {
+          const fields = schemaToFields(def);
           const state: FormState = {};
-          integration.fields.forEach((field) => {
-            state[field.name] = "";
+          fields.forEach((f) => {
+            state[f.name] = "";
           });
-          initialStates[integration.id] = state;
+          // prefer slug as stable key; fall back to id
+          const key = def.slug || def.id || Math.random().toString(36).slice(2);
+          initial[key] = state;
         });
-        setFormStates(initialStates);
-      } catch (err: any) {
-        setAlert({ type: "error", message: err.message || "Failed to load." });
+        setFormStates(initial);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to load integrations.";
+        setAlert({ type: "error", message });
       } finally {
         setLoading(false);
       }
     };
     fetchRegistry();
-  }, []);
+  }, [baseUrl]);
 
-  const handleExpand = (integrationId: string) => {
-    setExpanded((prev) => ({
-      ...prev,
-      [integrationId]: !prev[integrationId],
-    }));
+  const handleExpand = (slug: string) => {
+    setExpanded((prev) => ({ ...prev, [slug]: !prev[slug] }));
   };
 
-  const handleInputChange = (
-    integrationId: string,
-    fieldName: string,
-    value: string
-  ) => {
+  const handleInputChange = (slug: string, fieldName: string, value: string) => {
     setFormStates((prev) => ({
       ...prev,
-      [integrationId]: {
-        ...prev[integrationId],
+      [slug]: {
+        ...(prev[slug] || {}),
         [fieldName]: value,
       },
     }));
   };
 
-  const validate = (integration: Integration, formState: FormState): FormErrors => {
+  const validate = (def: IntegrationDef, formState: FormState): FormErrors => {
     const errors: FormErrors = {};
-    integration.fields.forEach((field) => {
+    const fields = schemaToFields(def);
+    fields.forEach((field) => {
       if (field.required && !formState[field.name]) {
         errors[field.name] = "This field is required.";
       }
@@ -99,54 +142,53 @@ const IntegrationForms: React.FC = () => {
     return errors;
   };
 
-  const handleSubmit = async (integration: Integration, e: React.FormEvent) => {
+  const handleSubmit = async (def: IntegrationDef, e: React.FormEvent) => {
     e.preventDefault();
-    const state = formStates[integration.id];
-    const errors = validate(integration, state);
-    setFormErrors((prev) => ({
-      ...prev,
-      [integration.id]: errors,
-    }));
-    if (Object.keys(errors).length > 0) {
-      setAlert({
-        type: "error",
-        message: "Please fill all required fields.",
-      });
+    const slug = def.slug || def.id || "";
+    if (!slug) {
+      setAlert({ type: "error", message: "Invalid integration (missing slug)." });
       return;
     }
+    const state = formStates[slug] || {};
+    const errors = validate(def, state);
+    setFormErrors((prev) => ({ ...prev, [slug]: errors }));
+    if (Object.keys(errors).length > 0) {
+      setAlert({ type: "error", message: "Please fill all required fields." });
+      return;
+    }
+
     try {
-      const payload = {
-        user_id: USER_ID,
-        integration_id: integration.id,
-        secrets: state,
-      };
-      const resp = await fetch("/secrets", {
+      const payload = { env, values: state };
+      const url = `${baseUrl}/projects/${projectId}/integrations/${encodeURIComponent(def.slug)}`;
+      const resp = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!resp.ok) {
-        const errJson = await resp.json().catch(() => ({}));
-        throw new Error(errJson.message || "Failed to save secrets.");
+        const errText = await resp.text();
+        throw new Error(`Failed to save secrets (${resp.status}). ${errText}`);
       }
-      setAlert({
-        type: "success",
-        message: `Secrets for ${integration.name} saved successfully.`,
-      });
-      // Optionally collapse after submit or clear form
-    } catch (err: any) {
-      setAlert({
-        type: "error",
-        message: err.message || "Submission failed.",
-      });
+      setAlert({ type: "success", message: `Saved ${def.name} secrets for ${env.toUpperCase()}.` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Submission failed.";
+      setAlert({ type: "error", message });
     }
   };
 
   return (
     <div>
-      <h2>Integration Secrets</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+        <h2 style={{ margin: 0 }}>Integration Secrets</h2>
+        <div>
+          <label htmlFor="env-select" style={{ marginRight: 8 }}>Environment:</label>
+          <select id="env-select" value={env} onChange={(e) => setEnv(e.target.value as "dev" | "prod")}> 
+            <option value="prod">Production</option>
+            <option value="dev">Development</option>
+          </select>
+        </div>
+      </div>
+
       {alert && (
         <div
           style={{
@@ -161,101 +203,101 @@ const IntegrationForms: React.FC = () => {
           {alert.message}
         </div>
       )}
+
       {loading ? (
         <div>Loading integrations...</div>
+      ) : registry.length === 0 ? (
+        <div>No integrations available. Ask an admin to seed the registry.</div>
       ) : (
         <div>
-          {registry.map((integration) => (
-            <div
-              key={integration.id}
-              style={{
-                border: "1px solid #ccc",
-                borderRadius: "6px",
-                marginBottom: "1em",
-                boxShadow: "0 2px 6px #0001",
-              }}
-            >
-              <button
+          {registry.map((def) => {
+            const slug = def.slug || def.id || Math.random().toString(36).slice(2);
+            const fields = schemaToFields(def);
+            return (
+              <div
+                key={slug}
                 style={{
-                  width: "100%",
-                  textAlign: "left",
-                  background: "#f7f7f7",
-                  border: "none",
-                  padding: "1em",
-                  fontWeight: "bold",
-                  fontSize: "1.1em",
-                  cursor: "pointer",
-                  borderRadius: "6px 6px 0 0",
+                  border: "1px solid #ccc",
+                  borderRadius: 6,
+                  marginBottom: "1em",
+                  boxShadow: "0 2px 6px #0001",
                 }}
-                onClick={() => handleExpand(integration.id)}
-                aria-expanded={!!expanded[integration.id]}
-                aria-controls={`integration-form-${integration.id}`}
               >
-                {integration.name}
-                <span style={{ float: "right" }}>
-                  {expanded[integration.id] ? "▲" : "▼"}
-                </span>
-              </button>
-              {expanded[integration.id] && (
-                <form
-                  id={`integration-form-${integration.id}`}
-                  style={{ padding: "1em" }}
-                  onSubmit={(e) => handleSubmit(integration, e)}
-                  noValidate
+                <button
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    background: "#f7f7f7",
+                    border: "none",
+                    padding: "1em",
+                    fontWeight: "bold",
+                    fontSize: "1.05em",
+                    cursor: "pointer",
+                    borderRadius: "6px 6px 0 0",
+                  }}
+                  onClick={() => handleExpand(slug)}
+                  aria-expanded={!!expanded[slug]}
+                  aria-controls={`integration-form-${slug}`}
                 >
-                  {integration.fields.map((field) => (
-                    <div key={field.name} style={{ marginBottom: "1em" }}>
-                      <label style={{ display: "block", fontWeight: 500 }}>
-                        {field.label}
-                        {field.required && (
-                          <span style={{ color: "#d32f2f" }}>*</span>
-                        )}
-                      </label>
-                      <input
-                        type={field.type === "password" ? "password" : "text"}
-                        name={field.name}
-                        value={formStates[integration.id]?.[field.name] || ""}
-                        onChange={(e) =>
-                          handleInputChange(
-                            integration.id,
-                            field.name,
-                            e.target.value
-                          )
-                        }
-                        required={field.required}
-                        style={{
-                          width: "100%",
-                          padding: "0.5em",
-                          border: "1px solid #ccc",
-                          borderRadius: "4px",
-                        }}
-                        autoComplete="off"
-                      />
-                      {formErrors[integration.id]?.[field.name] && (
-                        <div style={{ color: "#d32f2f", fontSize: "0.95em" }}>
-                          {formErrors[integration.id][field.name]}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    type="submit"
-                    style={{
-                      background: "#1976d2",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: "4px",
-                      padding: "0.7em 1.5em",
-                      fontWeight: "bold",
-                      cursor: "pointer",
-                    }}
+                  {def.name}
+                  <span style={{ float: "right" }}>{expanded[slug] ? "▲" : "▼"}</span>
+                </button>
+
+                {expanded[slug] && (
+                  <form
+                    id={`integration-form-${slug}`}
+                    style={{ padding: "1em" }}
+                    onSubmit={(e) => handleSubmit(def, e)}
+                    noValidate
                   >
-                    Save Secrets
-                  </button>
-                </form>
-              )}
-            </div>
-          ))}
+                    {fields.map((field) => (
+                      <div key={field.name} style={{ marginBottom: "1em" }}>
+                        <label style={{ display: "block", fontWeight: 500 }} htmlFor={`${slug}-${field.name}`}>
+                          {field.label}
+                          {field.required && <span style={{ color: "#d32f2f" }}>*</span>}
+                        </label>
+                        <input
+                          id={`${slug}-${field.name}`}
+                          type={field.type === "password" ? "password" : "text"}
+                          name={field.name}
+                          value={formStates[slug]?.[field.name] || ""}
+                          onChange={(e) => handleInputChange(slug, field.name, e.target.value)}
+                          required={field.required}
+                          style={{
+                            width: "100%",
+                            padding: "0.5em",
+                            border: "1px solid #ccc",
+                            borderRadius: 4,
+                          }}
+                          autoComplete="off"
+                        />
+                        {formErrors[slug]?.[field.name] && (
+                          <div style={{ color: "#d32f2f", fontSize: "0.95em" }}>
+                            {formErrors[slug][field.name]}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                    <button
+                      type="submit"
+                      style={{
+                        background: "#1976d2",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: 4,
+                        padding: "0.7em 1.5em",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Save Secrets
+                    </button>
+                  </form>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
