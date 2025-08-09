@@ -1,23 +1,41 @@
 import { useEffect, useState } from 'react'
 
+// Accept a few possible shapes the backend might return
+// 1) { id: string }
+// 2) { project: { id: string } }
+// 3) [{ id: string }, ...]
+// 4) null/undefined
+export type ProjectResponse =
+  | { id: string }
+  | { project?: { id?: string } }
+  | Array<{ id?: string }>
+  | null
+  | undefined
+
 export default function Home() {
   const [prompt, setPrompt] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const API_BASE = process.env.NEXT_PUBLIC_API_URL
 
-  // Small guard to ensure we see the API base at runtime (helpful during deploys)
   useEffect(() => {
-    // eslint-disable-next-line no-console
     console.log('LaunchKit FRONTEND using API:', API_BASE)
   }, [API_BASE])
 
-  const extractProjectId = (obj: any): string | undefined => {
-    // Be tolerant to different backend shapes
+  const extractProjectId = (obj: ProjectResponse): string | undefined => {
     if (!obj) return undefined
-    if (obj.id) return obj.id
-    if (obj.project?.id) return obj.project.id
-    if (Array.isArray(obj) && obj[0]?.id) return obj[0].id
+    // case 1
+    if (!Array.isArray(obj) && 'id' in obj && typeof obj.id === 'string') {
+      return obj.id
+    }
+    // case 2
+    if (!Array.isArray(obj) && 'project' in obj && obj.project?.id) {
+      return obj.project.id
+    }
+    // case 3
+    if (Array.isArray(obj) && obj.length > 0 && typeof obj[0]?.id === 'string') {
+      return obj[0].id
+    }
     return undefined
   }
 
@@ -27,13 +45,12 @@ export default function Home() {
     setSubmitted(true)
 
     try {
-      // 1) Create a project
       const timestamp = Date.now()
       const subdomain = `app-${timestamp}`
 
-      // eslint-disable-next-line no-console
       console.log('Submitting to API:', API_BASE)
 
+      // 1) Create a project
       const res = await fetch(`${API_BASE}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -45,18 +62,16 @@ export default function Home() {
       })
 
       const projectResText = await res.clone().text()
-      // eslint-disable-next-line no-console
       console.log('Project API response:', projectResText)
 
       if (!res.ok) {
         throw new Error(`Project create failed (${res.status})`)
       }
 
-      const projectObj = JSON.parse(projectResText || '{}')
+      const projectObj: ProjectResponse = JSON.parse(projectResText || '{}')
       const projectId = extractProjectId(projectObj)
 
       if (!projectId) {
-        // eslint-disable-next-line no-console
         console.error('Unexpected project response:', projectObj)
         throw new Error('Could not determine project ID from response.')
       }
@@ -73,22 +88,25 @@ export default function Home() {
       })
 
       const promptResText = await promptRes.clone().text()
-      // eslint-disable-next-line no-console
       console.log('Prompt API response:', promptResText)
 
       if (!promptRes.ok) {
         throw new Error(`Prompt submit failed (${promptRes.status})`)
       }
 
-      // 3) UI success: toast + redirect after 2.5s
+      // 3) Success message then redirect
       setSuccessMsg('Prompt submitted! Redirecting to dashboard…')
       setTimeout(() => {
         window.location.href = '/dashboard'
       }, 2500)
-    } catch (err: any) {
-      // eslint-disable-next-line no-console
-      console.error('Submit error:', err)
-      alert(err?.message || 'Something went wrong. Please try again.')
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        console.error('Submit error:', err)
+        alert(err.message)
+      } else {
+        console.error('Submit error:', err)
+        alert('Something went wrong. Please try again.')
+      }
       setSubmitted(false)
     }
   }
