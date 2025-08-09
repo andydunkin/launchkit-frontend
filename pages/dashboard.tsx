@@ -142,6 +142,13 @@ export default function Dashboard() {
                   >
                     View Files
                   </Link>
+                  {/* Concept Stage button */}
+                  <Link
+                    href={`/concept?project_id=${encodeURIComponent(proj.id)}`}
+                    className="px-3 py-2 rounded bg-purple-600 text-white hover:bg-purple-700"
+                  >
+                    Concept Stage
+                  </Link>
                   {/* Open app on wildcard subdomain (new tab) */}
                   {appHost && (
                     <a
