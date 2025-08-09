@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 // Accept a few possible shapes the backend might return
 // 1) { id: string }
@@ -12,14 +12,33 @@ export type ProjectResponse =
   | null
   | undefined
 
+function sanitizeApiBase(raw: string | undefined | null): string | null {
+  if (!raw) return null
+  try {
+    // Allow values like "api.example.com" or full URLs.
+    const withScheme = raw.startsWith('http') ? raw : `https://${raw}`
+    const u = new URL(withScheme)
+    // Force HTTPS no matter what
+    u.protocol = 'https:'
+    // Use origin only (strip any path/query) and drop trailing slash
+    return u.origin
+  } catch {
+    return null
+  }
+}
+
 export default function Home() {
   const [prompt, setPrompt] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL
+
+  const API_BASE = useMemo(
+    () => sanitizeApiBase(process.env.NEXT_PUBLIC_API_URL),
+    []
+  )
 
   useEffect(() => {
-    console.log('LaunchKit FRONTEND using API:', API_BASE)
+    console.log('LaunchKit FRONTEND using API (sanitized):', API_BASE)
   }, [API_BASE])
 
   const extractProjectId = (obj: ProjectResponse): string | undefined => {
@@ -42,6 +61,10 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!prompt.trim()) return
+    if (!API_BASE) {
+      alert('Backend API URL is not configured.')
+      return
+    }
     setSubmitted(true)
 
     try {
