@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 
-type FileRow = { id: string; path: string; created_at: string };
-type FileDetail = { id: string; path: string; contents: string; created_at: string };
+type FileRow = { id?: string; path: string; created_at: string };
+type FileDetail = { id?: string; path: string; contents?: string; created_at: string };
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
@@ -17,27 +17,32 @@ export default function ProjectFilesPage() {
   const [publishing, setPublishing] = useState(false);
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
 
-  const handlePublish = async () => {
+  const apiHost = useMemo(() => {
+    try {
+      return API ? new URL(API).host : "not set";
+    } catch {
+      return API || "not set";
+    }
+  }, []);
+
+  async function handlePublish() {
     if (!projectId || !API) return;
     setPublishing(true);
     setPublishMessage(null);
     try {
       const res = await fetch(`${API}/projects/${projectId}/publish`, { method: "POST" });
       if (!res.ok) throw new Error(`Publish failed: ${res.status}`);
-      const data = await res.json();
-      setPublishMessage(data.message || "Publish successful");
-    } catch (e: unknown) {
-      if (e instanceof Error) {
-        setPublishMessage(`Error: ${e.message}`);
-      } else {
-        setPublishMessage("Publish failed");
-      }
+      const data = await res.json().catch(() => ({}));
+      setPublishMessage((data && (data.message as string)) || "Publish successful");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Publish failed";
+      setPublishMessage(`Error: ${msg}`);
     } finally {
       setPublishing(false);
     }
-  };
+  }
 
-  const fetchFiles = async () => {
+  async function fetchFiles() {
     if (!projectId || !API) return;
     setLoading(true);
     setError(null);
@@ -45,62 +50,56 @@ export default function ProjectFilesPage() {
       const res = await fetch(`${API}/projects/${projectId}/files`);
       if (!res.ok) throw new Error(`List failed: ${res.status}`);
       const data = await res.json();
-      setFiles(Array.isArray(data) ? data : []);
-    } catch (e: unknown) {
-      if (e instanceof Error) {
-        setError(e.message);
-      } else {
-        setError("Failed to load files");
-      }
+      const list = Array.isArray(data) ? data : (data?.files ?? data?.data ?? []);
+      setFiles(Array.isArray(list) ? (list as FileRow[]) : []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load files");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const fetchFile = async (path: string) => {
+  async function fetchFile(path: string) {
     if (!projectId || !API) return;
     setError(null);
     try {
-      // encode path safely for URL segment
       const encoded = encodeURIComponent(path);
       const res = await fetch(`${API}/projects/${projectId}/files/${encoded}`);
       if (!res.ok) throw new Error(`Get file failed: ${res.status}`);
-      const data = (await res.json()) as FileDetail;
-      setSelected(data);
-    } catch (e: unknown) {
-      if (e instanceof Error) {
-        setError(e.message);
-      } else {
-        setError("Failed to load file");
-      }
+      const data = await res.json();
+      const file = (data && (data.file ?? data)) as FileDetail | undefined;
+      if (!file) throw new Error("Malformed response");
+      setSelected(file);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load file");
     }
-  };
+  }
 
   useEffect(() => {
-    fetchFiles();
+    if (projectId && API) {
+      fetchFiles();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, API]);
 
   return (
     <main className="min-h-screen p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Files for Project</h1>
-        <div className="text-sm text-gray-500">
-          API: {API ? new URL(API).host : "not set"}
-        </div>
+        <div className="text-sm text-gray-500">API: {apiHost}</div>
       </div>
 
       <div className="mb-4 flex items-center gap-3">
         <button
           onClick={fetchFiles}
-          className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+          className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
           disabled={loading || !projectId}
         >
           {loading ? "Loading…" : "Refresh"}
         </button>
         <button
           onClick={handlePublish}
-          className="px-3 py-2 rounded bg-green-600 text-white hover:bg-green-700"
+          className="px-3 py-2 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
           disabled={publishing || !projectId}
         >
           {publishing ? "Publishing…" : "Publish"}
@@ -113,12 +112,12 @@ export default function ProjectFilesPage() {
         {/* List */}
         <div className="border rounded-xl p-4">
           <h2 className="font-medium mb-3">Files</h2>
-          {files.length === 0 && (
+          {files.length === 0 && !loading && (
             <div className="text-sm text-gray-500">No files yet.</div>
           )}
           <ul className="space-y-2">
             {files.map((f) => (
-              <li key={f.id}>
+              <li key={f.id ?? `${f.path}-${f.created_at}`}>
                 <button
                   onClick={() => fetchFile(f.path)}
                   className="w-full text-left px-3 py-2 rounded hover:bg-gray-50 border"
@@ -151,13 +150,13 @@ export default function ProjectFilesPage() {
                 </div>
               </div>
               <pre className="border rounded p-3 overflow-auto text-sm">
-                {selected.contents}
+                {selected.contents ?? ""}
               </pre>
               <div className="mt-3 flex gap-2">
                 <a
                   className="px-3 py-2 rounded border hover:bg-gray-50"
                   href={`data:text/plain;charset=utf-8,${encodeURIComponent(
-                    selected.contents || ""
+                    selected.contents ?? ""
                   )}`}
                   download={selected.path.split("/").pop() || "file.txt"}
                 >
@@ -165,7 +164,7 @@ export default function ProjectFilesPage() {
                 </a>
                 <button
                   className="px-3 py-2 rounded border hover:bg-gray-50"
-                  onClick={() => navigator.clipboard.writeText(selected.contents || "")}
+                  onClick={() => navigator.clipboard.writeText(selected.contents ?? "")}
                 >
                   Copy
                 </button>
