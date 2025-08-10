@@ -19,6 +19,10 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 import { useRouter } from "next/router";
 import React, { useMemo, useRef, useState } from "react";
 
+// Helper to safely extract an error message without using `any`
+const errMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err);
+
 /**
  * Step 4a: UI skeleton only — no API calls yet.
  * Left: Topics list
@@ -170,13 +174,13 @@ export default function ProjectConceptPage() {
           topicId: activeTopicId,
         },
       ]);
-    } catch (e: any) {
+    } catch (err: unknown) {
       setMessages(prev => [
         ...prev,
         {
           id: `${userId}-err`,
           role: "system",
-          content: `⚠️ Failed to reach AI: ${e?.message || "unknown error"}`,
+          content: `⚠️ Failed to reach AI: ${errMessage(err)}`,
           at: new Date().toISOString(),
           topicId: activeTopicId,
         },
@@ -206,8 +210,8 @@ export default function ProjectConceptPage() {
       const nt = data.topic;
       setTopics(prev => [nt, ...prev]);
       setActiveTopicId(nt.id);
-    } catch (e: any) {
-      alert(`Failed to create topic: ${e?.message || "unknown error"}`);
+    } catch (err: unknown) {
+      alert(`Failed to create topic: ${errMessage(err)}`);
     }
   };
 
@@ -226,14 +230,14 @@ export default function ProjectConceptPage() {
         if (!activeTopicId && ts.length) {
           setActiveTopicId(ts[0].id);
         }
-      } catch (e: any) {
-        if (!cancelled) setTopicsError(e?.message || "Failed to load topics");
+      } catch (err: unknown) {
+        if (!cancelled) setTopicsError(errMessage(err) || "Failed to load topics");
       } finally {
         if (!cancelled) setLoadingTopics(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, activeTopicId]);
 
   return (
     <div style={pageWrap}>
