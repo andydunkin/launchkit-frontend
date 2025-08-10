@@ -123,6 +123,12 @@ type GetTopicsResp = { ok: boolean; topics: Topic[] };
 type CreateTopicResp = { ok: boolean; topic: Topic };
 type ChatResp = { ok: boolean; assistant_message: { id?: string; content: string } };
 
+// Fetch historical messages for a topic
+type MessagesListResp = {
+  ok: boolean;
+  messages: { id: string; role: "user" | "assistant" | "system"; content: string; at?: string }[];
+};
+
 type ProjectAction = {
   id: string;
   project_id?: string;
@@ -151,6 +157,7 @@ export default function ProjectConceptPage() {
   const activeTopic = useMemo(() => topics.find(t => t.id === activeTopicId), [topics, activeTopicId]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const seededLoadRef = useRef(0);
   const [actions, setActions] = useState<ProjectAction[]>([]);
   const [loadingActions, setLoadingActions] = useState(false);
   const [actionsError, setActionsError] = useState<string | null>(null);
@@ -242,10 +249,33 @@ export default function ProjectConceptPage() {
       const nt = data.topic;
       setTopics(prev => [nt, ...prev]);
       setActiveTopicId(nt.id);
+      setMessages([]);
     } catch (err: unknown) {
       alert(`Failed to create topic: ${errMessage(err)}`);
     }
   };
+
+  // Helper to load chat history for a topic
+  async function refreshMessages(pid: string, tid: string) {
+    if (!pid || !tid) return;
+    const ticket = ++seededLoadRef.current;
+    try {
+      const data = await api<MessagesListResp>(`/concept/projects/${pid}/topics/${tid}/messages`);
+      // Defensive: ignore out-of-date responses
+      if (ticket !== seededLoadRef.current) return;
+      const rows = (data.messages || []).map((m, i) => ({
+        id: m.id || `hist-${i}`,
+        role: m.role,
+        content: m.content,
+        at: m.at || new Date().toISOString(),
+        topicId: tid,
+      })) as ChatMessage[];
+      setMessages(rows);
+    } catch (_e) {
+      // If messages endpoint isn't ready yet, don't hard error the UI
+      // We simply show an empty thread and wait for first reply
+    }
+  }
 
   async function startConceptIfNeeded(pid: string): Promise<Topic | null> {
     try {
@@ -333,6 +363,13 @@ export default function ProjectConceptPage() {
     })();
     return () => { cancelled = true; };
   }, [projectId]);
+
+  // Effect: load chat history when topic changes
+  React.useEffect(() => {
+    if (!projectId || !activeTopicId) return;
+    void refreshMessages(projectId, activeTopicId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, activeTopicId]);
 
   React.useEffect(() => {
     if (!projectId) return;
