@@ -46,9 +46,8 @@ type ChatMessage = {
   assistant?: boolean;
 };
 
-const pageWrap: React.CSSProperties = {
+const basePageWrap: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(260px, 340px) 1fr",
   height: "100vh",
 };
 
@@ -124,6 +123,21 @@ type GetTopicsResp = { ok: boolean; topics: Topic[] };
 type CreateTopicResp = { ok: boolean; topic: Topic };
 type ChatResp = { ok: boolean; assistant_message: { id?: string; content: string } };
 
+type ProjectAction = {
+  id: string;
+  project_id?: string;
+  topic_id?: string | null;
+  label: string;
+  description?: string | null;
+  trigger_type: "input_form" | "confirm_action" | "auto_commit" | string;
+  payload_schema?: unknown;
+  status: "pending" | "completed" | "skipped" | string;
+  created_at?: string;
+  completed_at?: string | null;
+};
+type ActionsListResp = { ok: boolean; actions: ProjectAction[] };
+type ActionUpdateResp = { ok: boolean; action: ProjectAction };
+
 export default function ProjectConceptPage() {
   const router = useRouter();
   const { projectId } = router.query as { projectId?: string };
@@ -135,6 +149,10 @@ export default function ProjectConceptPage() {
   const activeTopic = useMemo(() => topics.find(t => t.id === activeTopicId), [topics, activeTopicId]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [actions, setActions] = useState<ProjectAction[]>([]);
+  const [loadingActions, setLoadingActions] = useState(false);
+  const [actionsError, setActionsError] = useState<string | null>(null);
+  const [actionsRefreshTick, setActionsRefreshTick] = useState(0);
 
   const [draft, setDraft] = useState("");
 
@@ -146,6 +164,18 @@ export default function ProjectConceptPage() {
     () => messages.filter(m => !activeTopicId || m.topicId === activeTopicId),
     [messages, activeTopicId]
   );
+
+  const pendingActions = useMemo(
+    () => actions.filter(a => a.status === "pending"),
+    [actions]
+  );
+  const hasActionRail = pendingActions.length > 0;
+  const layout = useMemo<React.CSSProperties>(() => {
+    return {
+      ...basePageWrap,
+      gridTemplateColumns: hasActionRail ? "minmax(260px, 340px) 1fr 300px" : "minmax(260px, 340px) 1fr",
+    };
+  }, [hasActionRail]);
 
   const addUserMessage = async (text: string) => {
     const trimmed = text.trim();
@@ -215,6 +245,36 @@ export default function ProjectConceptPage() {
     }
   };
 
+  async function refreshActions(pid: string) {
+    try {
+      setLoadingActions(true);
+      setActionsError(null);
+      const data = await api<ActionsListResp>(`/ai/actions/projects/${pid}`);
+      setActions(data.actions || []);
+    } catch (err: unknown) {
+      setActionsError(errMessage(err));
+    } finally {
+      setLoadingActions(false);
+    }
+  }
+
+  async function completeAction(actionId: string) {
+    try {
+      // optimistic update
+      setActions(prev => prev.map(a => (a.id === actionId ? { ...a, status: "completed", completed_at: new Date().toISOString() } : a)));
+      await api<ActionUpdateResp>(`/ai/actions/${actionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "completed" }),
+      });
+      // nudge a refresh in background to stay in sync
+      setActionsRefreshTick(t => t + 1);
+    } catch (err: unknown) {
+      // revert on error
+      setActions(prev => prev.map(a => (a.id === actionId ? { ...a, status: "pending", completed_at: null } : a)));
+      setActionsError(`Failed to complete action: ${errMessage(err)}`);
+    }
+  }
+
   React.useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
@@ -239,8 +299,14 @@ export default function ProjectConceptPage() {
     return () => { cancelled = true; };
   }, [projectId, activeTopicId]);
 
+  React.useEffect(() => {
+    if (!projectId) return;
+    void refreshActions(projectId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, actionsRefreshTick]);
+
   return (
-    <div style={pageWrap}>
+    <div style={layout}>
       {/* Left: Topics */}
       <aside style={col}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
@@ -334,6 +400,49 @@ export default function ProjectConceptPage() {
           </div>
         </footer>
       </main>
+      {hasActionRail && (
+        <aside style={{ borderLeft: "1px solid #eee", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>Actions</h3>
+            <span style={{ fontSize: 12, color: "#6b7280" }}>{pendingActions.length}</span>
+          </div>
+
+          {loadingActions && <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Loading…</div>}
+          {actionsError && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>{actionsError}</div>}
+
+          <ul style={{ ...list, marginTop: 8 }}>
+            {pendingActions.map(a => (
+              <li key={a.id}>
+                <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>{a.label}</div>
+                  {a.description ? (
+                    <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 8 }}>{a.description}</div>
+                  ) : null}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#6b7280", border: "1px solid #e5e7eb", borderRadius: 999, padding: "2px 8px" }}>
+                      {a.trigger_type}
+                    </span>
+                    <button
+                      onClick={() => completeAction(a.id)}
+                      style={{
+                        marginLeft: "auto",
+                        padding: "6px 10px",
+                        border: "1px solid #111827",
+                        background: "#111827",
+                        color: "white",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Complete
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </aside>
+      )}
     </div>
   );
 }
