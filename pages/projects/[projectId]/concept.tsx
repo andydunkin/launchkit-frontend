@@ -144,6 +144,8 @@ export default function ProjectConceptPage() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const [activeTopicId, setActiveTopicId] = useState<string>("");
   const activeTopic = useMemo(() => topics.find(t => t.id === activeTopicId), [topics, activeTopicId]);
@@ -245,6 +247,25 @@ export default function ProjectConceptPage() {
     }
   };
 
+  async function startConceptIfNeeded(pid: string) {
+    try {
+      setStarting(true);
+      setStartError(null);
+      // Seed the first topic/question if the project has none yet
+      await api<{ ok: boolean; topic?: Topic }>(`/concept/start`, {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: pid,
+          initial_prompt: "Kick off scoping: What are we building? Who is it for? What’s the core outcome?",
+        }),
+      });
+    } catch (err) {
+      setStartError(errMessage(err));
+    } finally {
+      setStarting(false);
+    }
+  }
+
   async function refreshActions(pid: string) {
     try {
       setLoadingActions(true);
@@ -284,7 +305,13 @@ export default function ProjectConceptPage() {
         setTopicsError(null);
         const data = await api<GetTopicsResp>(`/concept/projects/${projectId}/topics`);
         if (cancelled) return;
-        const ts = data.topics || [];
+        let ts = data.topics || [];
+        // If no topics exist yet, seed one via /concept/start, then refetch once.
+        if (!ts.length && projectId) {
+          await startConceptIfNeeded(projectId);
+          const refetched = await api<GetTopicsResp>(`/concept/projects/${projectId}/topics`);
+          ts = refetched.topics || [];
+        }
         setTopics(ts);
         // auto-select first topic if none selected
         if (!activeTopicId && ts.length) {
@@ -398,6 +425,8 @@ export default function ProjectConceptPage() {
               {sending ? "Sending…" : "Send"}
             </button>
           </div>
+          {starting && <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>Starting concept…</div>}
+          {startError && <div style={{ marginTop: 6, fontSize: 12, color: "#b91c1c" }}>{startError}</div>}
         </footer>
       </main>
       {hasActionRail && (
