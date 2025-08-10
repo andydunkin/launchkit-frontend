@@ -126,7 +126,7 @@ const bubble = (role: ChatMessage["role"]): React.CSSProperties => ({
   whiteSpace: "pre-wrap",
 });
 
-type GetTopicsResp = { ok: boolean; topics: Topic[] };
+// type GetTopicsResp = { ok: boolean; topics: Topic[] }; // Removed: unused type
 type CreateTopicResp = { ok: boolean; topic: Topic };
 type ChatResp = { ok: boolean; assistant_message: { id?: string; content: string } };
 
@@ -280,29 +280,13 @@ export default function ProjectConceptPage() {
         topicId: tid,
       })) as ChatMessage[];
       setMessages(rows);
-    } catch (_e) {
+    } catch {
       // If messages endpoint isn't ready yet, don't hard error the UI
       // We simply show an empty thread and wait for first reply
     }
   }
 
-  async function startConceptIfNeeded(pid: string): Promise<Topic | null> {
-    try {
-      setStarting(true);
-      setStartError(null);
-      // Do not send an initial_prompt — backend will read the project's stored prompt
-      const res = await api<{ ok: boolean; topic?: Topic }>(`/concept/start`, {
-        method: "POST",
-        body: JSON.stringify({ project_id: pid }),
-      });
-      return res.topic ?? null;
-    } catch (err) {
-      setStartError(errMessage(err));
-      return null;
-    } finally {
-      setStarting(false);
-    }
-  }
+  // Removed unused function startConceptIfNeeded
 
   async function refreshActions(pid: string) {
     try {
@@ -343,7 +327,7 @@ export default function ProjectConceptPage() {
         setTopicsError(null);
         const data = await api<OverviewResp>(`/concept/projects/${projectId}/overview`);
         if (cancelled) return;
-        let ts = data.topics || [];
+        const ts = data.topics || [];
         setTopics(ts);
         // auto-select first topic if none selected
         if (!activeTopicId && ts.length) {
@@ -371,20 +355,17 @@ export default function ProjectConceptPage() {
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // Effect: load chat history when topic changes
   React.useEffect(() => {
     if (!projectId || !activeTopicId) return;
     void refreshMessages(projectId, activeTopicId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeTopicId]);
 
   React.useEffect(() => {
     if (!projectId) return;
     void refreshActions(projectId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, actionsRefreshTick]);
 
   React.useEffect(() => {
