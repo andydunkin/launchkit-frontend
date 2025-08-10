@@ -37,6 +37,13 @@ type Topic = {
   project_id?: string;
 };
 
+type OverviewResp = {
+  ok: boolean;
+  seed_prompt?: string;
+  topics: Topic[];
+  first_question?: { id: string; content: string };
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -169,6 +176,8 @@ export default function ProjectConceptPage() {
   const [topicsError, setTopicsError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
+  const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
+
   const filtered = useMemo(
     () => messages.filter(m => !activeTopicId || m.topicId === activeTopicId),
     [messages, activeTopicId]
@@ -281,13 +290,10 @@ export default function ProjectConceptPage() {
     try {
       setStarting(true);
       setStartError(null);
+      // Do not send an initial_prompt — backend will read the project's stored prompt
       const res = await api<{ ok: boolean; topic?: Topic }>(`/concept/start`, {
         method: "POST",
-        body: JSON.stringify({
-          project_id: pid,
-          initial_prompt:
-            "Kick off scoping: What are we building? Who is it for? What’s the core outcome?",
-        }),
+        body: JSON.stringify({ project_id: pid }),
       });
       return res.topic ?? null;
     } catch (err) {
@@ -335,25 +341,28 @@ export default function ProjectConceptPage() {
       try {
         setLoadingTopics(true);
         setTopicsError(null);
-        const data = await api<GetTopicsResp>(`/concept/projects/${projectId}/topics`);
+        const data = await api<OverviewResp>(`/concept/projects/${projectId}/overview`);
         if (cancelled) return;
         let ts = data.topics || [];
-        // If no topics exist yet, seed one via /concept/start.
-        if (!ts.length && projectId) {
-          const seeded = await startConceptIfNeeded(projectId);
-          if (cancelled) return;
-          if (seeded) {
-            ts = [seeded, ...ts];
-          } else {
-            // Fallback: refetch in case another worker seeded it
-            const refetched = await api<GetTopicsResp>(`/concept/projects/${projectId}/topics`);
-            ts = refetched.topics || [];
-          }
-        }
         setTopics(ts);
         // auto-select first topic if none selected
         if (!activeTopicId && ts.length) {
           setActiveTopicId(ts[0].id);
+        }
+        setSeedPrompt(data.seed_prompt ?? null);
+        // If overview includes a first_question, push it as a ChatMessage from assistant
+        if (data.first_question) {
+          setMessages([
+            {
+              id: data.first_question.id,
+              role: "assistant",
+              content: data.first_question.content,
+              at: new Date().toISOString(),
+              topicId: ts.length ? ts[0].id : undefined,
+            },
+          ]);
+        } else {
+          setMessages([]);
         }
       } catch (err: unknown) {
         if (!cancelled) setTopicsError(errMessage(err) || "Failed to load topics");
@@ -362,6 +371,7 @@ export default function ProjectConceptPage() {
       }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // Effect: load chat history when topic changes
@@ -428,7 +438,11 @@ export default function ProjectConceptPage() {
             <a href={`/projects/${projectId}`} style={pill}>Project Home</a>
           </div>
         </header>
-
+        {seedPrompt && (
+          <div style={{ fontSize: 13, color: "#6b7280", fontStyle: "italic", margin: "4px 0 10px 0" }}>
+            {seedPrompt}
+          </div>
+        )}
         <section style={chatWrap} aria-label="chat thread">
           <div style={{ display: "grid", gap: 12 }}>
             {filtered.map(m => (
