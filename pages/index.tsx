@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 // Accept a few possible shapes the backend might return
 // 1) { id: string }
@@ -36,7 +36,6 @@ export default function Home() {
     () => sanitizeApiBase(process.env.NEXT_PUBLIC_API_URL),
     []
   )
-
 
   const extractProjectId = (obj: ProjectResponse): string | undefined => {
     if (!obj) return undefined
@@ -79,48 +78,42 @@ export default function Home() {
         }),
       })
 
-      const projectResText = await res.clone().text()
-
+      const bodyText = await res.clone().text()
       if (!res.ok) {
         throw new Error(`Project create failed (${res.status})`)
       }
 
-      const projectObj: ProjectResponse = JSON.parse(projectResText || '{}')
+      const projectObj: ProjectResponse = JSON.parse(bodyText || '{}')
       const projectId = extractProjectId(projectObj)
-
       if (!projectId) {
-        /* swallow console output to satisfy lint in production */
         throw new Error('Could not determine project ID from response.')
       }
 
-      // 2) Send the initial prompt
-      const promptRes = await fetch(`${API_BASE}/prompts/`, {
+      // 2) Kick off Concept stage with the initial prompt (backend will seed topic, action, first AI reply)
+      const startRes = await fetch(`${API_BASE}/concept/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: projectId,
-          content: prompt,
-          response: {},
+          title: 'Concept Kickoff',
+          initial_prompt: prompt.trim(),
         }),
       })
 
-      const promptResText = await promptRes.clone().text()
-
-      if (!promptRes.ok) {
-        throw new Error(`Prompt submit failed (${promptRes.status})`)
+      if (!startRes.ok) {
+        const t = await startRes.text()
+        throw new Error(`Concept start failed (${startRes.status}): ${t}`)
       }
 
-      // 3) Success message then redirect
-      setSuccessMsg('Prompt submitted! Redirecting to dashboard…')
+      // 3) Success message then redirect **straight to the project concept page**
+      setSuccessMsg('Project created! Taking you to the concept stage…')
       setTimeout(() => {
-        window.location.href = '/dashboard'
-      }, 2500)
+        window.location.href = `/projects/${projectId}/concept`
+      }, 1200)
     } catch (err: unknown) {
       if (err instanceof Error) {
-        /* swallow console output to satisfy lint in production */
         alert(err.message)
       } else {
-        /* swallow console output to satisfy lint in production */
         alert('Something went wrong. Please try again.')
       }
       setSubmitted(false)

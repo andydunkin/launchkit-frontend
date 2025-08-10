@@ -247,20 +247,22 @@ export default function ProjectConceptPage() {
     }
   };
 
-  async function startConceptIfNeeded(pid: string) {
+  async function startConceptIfNeeded(pid: string): Promise<Topic | null> {
     try {
       setStarting(true);
       setStartError(null);
-      // Seed the first topic/question if the project has none yet
-      await api<{ ok: boolean; topic?: Topic }>(`/concept/start`, {
+      const res = await api<{ ok: boolean; topic?: Topic }>(`/concept/start`, {
         method: "POST",
         body: JSON.stringify({
           project_id: pid,
-          initial_prompt: "Kick off scoping: What are we building? Who is it for? What’s the core outcome?",
+          initial_prompt:
+            "Kick off scoping: What are we building? Who is it for? What’s the core outcome?",
         }),
       });
+      return res.topic ?? null;
     } catch (err) {
       setStartError(errMessage(err));
+      return null;
     } finally {
       setStarting(false);
     }
@@ -306,11 +308,17 @@ export default function ProjectConceptPage() {
         const data = await api<GetTopicsResp>(`/concept/projects/${projectId}/topics`);
         if (cancelled) return;
         let ts = data.topics || [];
-        // If no topics exist yet, seed one via /concept/start, then refetch once.
+        // If no topics exist yet, seed one via /concept/start.
         if (!ts.length && projectId) {
-          await startConceptIfNeeded(projectId);
-          const refetched = await api<GetTopicsResp>(`/concept/projects/${projectId}/topics`);
-          ts = refetched.topics || [];
+          const seeded = await startConceptIfNeeded(projectId);
+          if (cancelled) return;
+          if (seeded) {
+            ts = [seeded, ...ts];
+          } else {
+            // Fallback: refetch in case another worker seeded it
+            const refetched = await api<GetTopicsResp>(`/concept/projects/${projectId}/topics`);
+            ts = refetched.topics || [];
+          }
         }
         setTopics(ts);
         // auto-select first topic if none selected
@@ -324,13 +332,19 @@ export default function ProjectConceptPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId, activeTopicId]);
+  }, [projectId]);
 
   React.useEffect(() => {
     if (!projectId) return;
     void refreshActions(projectId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, actionsRefreshTick]);
+
+  React.useEffect(() => {
+    if (!projectId) return;
+    const id = setInterval(() => setActionsRefreshTick((t) => t + 1), 15000);
+    return () => clearInterval(id);
+  }, [projectId]);
 
   return (
     <div style={layout}>
