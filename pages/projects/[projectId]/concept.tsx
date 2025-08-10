@@ -1,3 +1,21 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!API_BASE) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
 import { useRouter } from "next/router";
 import React, { useMemo, useRef, useState } from "react";
 
@@ -12,6 +30,7 @@ type Topic = {
   id: string;
   title: string;
   created_at?: string;
+  project_id?: string;
 };
 
 type ChatMessage = {
@@ -20,6 +39,7 @@ type ChatMessage = {
   content: string;
   at: string;
   topicId?: string;
+  assistant?: boolean;
 };
 
 const pageWrap: React.CSSProperties = {
@@ -96,67 +116,124 @@ const bubble = (role: ChatMessage["role"]): React.CSSProperties => ({
   whiteSpace: "pre-wrap",
 });
 
+type GetTopicsResp = { ok: boolean; topics: Topic[] };
+type CreateTopicResp = { ok: boolean; topic: Topic };
+type ChatResp = { ok: boolean; assistant_message: { id?: string; content: string } };
+
 export default function ProjectConceptPage() {
   const router = useRouter();
   const { projectId } = router.query as { projectId?: string };
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Placeholder local state (we’ll replace with API data in step 4b)
-  const [topics, setTopics] = useState<Topic[]>([
-    { id: "t-1", title: "Core Problem & Audience" },
-    { id: "t-2", title: "Primary Features" },
-    { id: "t-3", title: "Payments & Monetization" },
-  ]);
+  const [topics, setTopics] = useState<Topic[]>([]);
 
-  const [activeTopicId, setActiveTopicId] = useState<string>(topics[0]?.id ?? "");
+  const [activeTopicId, setActiveTopicId] = useState<string>("");
   const activeTopic = useMemo(() => topics.find(t => t.id === activeTopicId), [topics, activeTopicId]);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "m-1",
-      role: "assistant",
-      content: "Welcome! Let’s clarify the project at a high level. What are we building?",
-      at: new Date().toISOString(),
-      topicId: "t-1",
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [draft, setDraft] = useState("");
+
+  const [loadingTopics, setLoadingTopics] = useState(false);
+  const [topicsError, setTopicsError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
 
   const filtered = useMemo(
     () => messages.filter(m => !activeTopicId || m.topicId === activeTopicId),
     [messages, activeTopicId]
   );
 
-  const addUserMessage = (text: string) => {
-    const id = `m-${Date.now()}`;
+  const addUserMessage = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || !activeTopicId || !projectId) return;
+    const userId = `m-${Date.now()}`;
+    const nowIso = new Date().toISOString();
+    // optimistic append user message
     setMessages(prev => [
       ...prev,
-      { id, role: "user", content: text.trim(), at: new Date().toISOString(), topicId: activeTopicId },
-      // Placeholder assistant echo. In 4c we’ll call /ai/concept endpoints.
-      {
-        id: `${id}-a`,
-        role: "assistant",
-        content: "Got it. (This is a placeholder response — we’ll wire AI next.)",
-        at: new Date().toISOString(),
-        topicId: activeTopicId,
-      },
+      { id: userId, role: "user", content: trimmed, at: nowIso, topicId: activeTopicId },
     ]);
+    try {
+      setSending(true);
+      const resp = await api<ChatResp>(`/concept/projects/${projectId}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ topic_id: activeTopicId, message: trimmed }),
+      });
+      const aiText = resp?.assistant_message?.content ?? "";
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `${userId}-ai`,
+          role: "assistant",
+          content: aiText || "OK.",
+          at: new Date().toISOString(),
+          topicId: activeTopicId,
+        },
+      ]);
+    } catch (e: any) {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `${userId}-err`,
+          role: "system",
+          content: `⚠️ Failed to reach AI: ${e?.message || "unknown error"}`,
+          at: new Date().toISOString(),
+          topicId: activeTopicId,
+        },
+      ]);
+    } finally {
+      setSending(false);
+    }
   };
 
-  const onSend = () => {
+  const onSend = async () => {
     const text = draft.trim();
     if (!text) return;
-    addUserMessage(text);
+    await addUserMessage(text);
     setDraft("");
     inputRef.current?.focus();
   };
 
-  const onNewTopic = () => {
-    const nt: Topic = { id: `t-${Date.now()}`, title: "New topic" };
-    setTopics(prev => [nt, ...prev]);
-    setActiveTopicId(nt.id);
+  const onNewTopic = async () => {
+    if (!projectId) return;
+    const title = window.prompt("Topic title?", "New topic")?.trim();
+    if (!title) return;
+    try {
+      const data = await api<CreateTopicResp>(`/concept/projects/${projectId}/topics`, {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
+      const nt = data.topic;
+      setTopics(prev => [nt, ...prev]);
+      setActiveTopicId(nt.id);
+    } catch (e: any) {
+      alert(`Failed to create topic: ${e?.message || "unknown error"}`);
+    }
   };
+
+  React.useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoadingTopics(true);
+        setTopicsError(null);
+        const data = await api<GetTopicsResp>(`/concept/projects/${projectId}/topics`);
+        if (cancelled) return;
+        const ts = data.topics || [];
+        setTopics(ts);
+        // auto-select first topic if none selected
+        if (!activeTopicId && ts.length) {
+          setActiveTopicId(ts[0].id);
+        }
+      } catch (e: any) {
+        if (!cancelled) setTopicsError(e?.message || "Failed to load topics");
+      } finally {
+        if (!cancelled) setLoadingTopics(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   return (
     <div style={pageWrap}>
@@ -171,6 +248,9 @@ export default function ProjectConceptPage() {
           <h2 style={{ margin: 0, fontSize: 16 }}>Topics</h2>
           <button onClick={onNewTopic} style={{ ...pill, borderRadius: 8 }}>+ New</button>
         </div>
+
+        {loadingTopics && <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Loading topics…</div>}
+        {topicsError && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>{topicsError}</div>}
 
         <ul style={list}>
           {topics.map(t => (
@@ -233,7 +313,7 @@ export default function ProjectConceptPage() {
             />
             <button
               onClick={onSend}
-              disabled={!draft.trim()}
+              disabled={sending || !draft.trim()}
               style={{
                 alignSelf: "end",
                 padding: "10px 14px",
@@ -241,10 +321,11 @@ export default function ProjectConceptPage() {
                 background: "#111827",
                 color: "white",
                 borderRadius: 10,
-                cursor: draft.trim() ? "pointer" : "not-allowed",
+                opacity: sending ? 0.7 : 1,
+                cursor: sending ? "progress" : draft.trim() ? "pointer" : "not-allowed",
               }}
             >
-              Send
+              {sending ? "Sending…" : "Send"}
             </button>
           </div>
         </footer>
