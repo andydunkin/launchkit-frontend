@@ -195,21 +195,22 @@ export default function ProjectConceptPage() {
     };
   }, [hasActionRail]);
 
-  const addUserMessage = async (text: string) => {
+  const addUserMessage = async (text: string, topicIdOverride?: string) => {
     const trimmed = text.trim();
-    if (!trimmed || !activeTopicId || !projectId) return;
+    const tid = topicIdOverride || activeTopicId;
+    if (!trimmed || !tid || !projectId) return;
     const userId = `m-${Date.now()}`;
     const nowIso = new Date().toISOString();
     // optimistic append user message
     setMessages(prev => [
       ...prev,
-      { id: userId, role: "user", content: trimmed, at: nowIso, topicId: activeTopicId },
+      { id: userId, role: "user", content: trimmed, at: nowIso, topicId: tid },
     ]);
     try {
       setSending(true);
       const resp = await api<ChatResp>(`/concept/projects/${projectId}/chat`, {
         method: "POST",
-        body: JSON.stringify({ topic_id: activeTopicId, message: trimmed }),
+        body: JSON.stringify({ topic_id: tid, message: trimmed }),
       });
       const aiText = resp?.assistant_message?.content ?? "";
       setMessages(prev => [
@@ -219,7 +220,7 @@ export default function ProjectConceptPage() {
           role: "assistant",
           content: aiText || "OK.",
           at: new Date().toISOString(),
-          topicId: activeTopicId,
+          topicId: tid,
         },
       ]);
     } catch (err: unknown) {
@@ -230,7 +231,7 @@ export default function ProjectConceptPage() {
           role: "system",
           content: `⚠️ Failed to reach AI: ${errMessage(err)}`,
           at: new Date().toISOString(),
-          topicId: activeTopicId,
+          topicId: tid,
         },
       ]);
     } finally {
@@ -240,10 +241,24 @@ export default function ProjectConceptPage() {
 
   const onSend = async () => {
     const text = draft.trim();
-    if (!text) return;
-    await addUserMessage(text);
-    setDraft("");
-    inputRef.current?.focus();
+    if (!text || !projectId) return;
+    let tid = activeTopicId;
+    try {
+      // If no active topic, create a default "General" topic first
+      if (!tid) {
+        const data = await api<CreateTopicResp>(`/concept/projects/${projectId}/topics`, {
+          method: "POST",
+          body: JSON.stringify({ title: "General" }),
+        });
+        tid = data.topic.id;
+        setTopics(prev => [data.topic, ...prev]);
+        setActiveTopicId(tid);
+      }
+      await addUserMessage(text, tid);
+    } finally {
+      setDraft("");
+      inputRef.current?.focus();
+    }
   };
 
   const onNewTopic = async () => {
@@ -321,20 +336,37 @@ export default function ProjectConceptPage() {
   React.useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
-    (async () => {
+    const loadOverview = async () => {
+      setLoadingTopics(true);
+      setTopicsError(null);
       try {
-        setLoadingTopics(true);
-        setTopicsError(null);
-        const data = await api<OverviewResp>(`/concept/projects/${projectId}/overview`);
+        // 1) fetch overview
+        let data = await api<OverviewResp>(`/concept/projects/${projectId}/overview`);
         if (cancelled) return;
+        // 2) if no topics, auto-start then re-fetch overview
+        if (!data.topics || data.topics.length === 0) {
+          try {
+            await api<{ ok: boolean }>(`/concept/start`, {
+              method: "POST",
+              body: JSON.stringify({ project_id: projectId }),
+            });
+            data = await api<OverviewResp>(`/concept/projects/${projectId}/overview`);
+            if (cancelled) return;
+          } catch (e) {
+            // If start fails, surface error and stop
+            if (!cancelled) setTopicsError(errMessage(e) || "Failed to start concept");
+            return;
+          }
+        }
         const ts = data.topics || [];
         setTopics(ts);
-        // auto-select first topic if none selected
+        // set seed prompt
+        setSeedPrompt(data.seed_prompt ?? null);
+        // select first topic if none selected
         if (!activeTopicId && ts.length) {
           setActiveTopicId(ts[0].id);
         }
-        setSeedPrompt(data.seed_prompt ?? null);
-        // If overview includes a first_question, push it as a ChatMessage from assistant
+        // seed first question as assistant message (tie to first topic if available)
         if (data.first_question) {
           setMessages([
             {
@@ -353,7 +385,8 @@ export default function ProjectConceptPage() {
       } finally {
         if (!cancelled) setLoadingTopics(false);
       }
-    })();
+    };
+    void loadOverview();
     return () => { cancelled = true; };
   }, [projectId]);
 
