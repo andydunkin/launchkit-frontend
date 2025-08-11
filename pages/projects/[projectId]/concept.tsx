@@ -153,7 +153,13 @@ type ActionUpdateResp = { ok: boolean; action: ProjectAction };
 
 export default function ProjectConceptPage() {
   const router = useRouter();
-  const { projectId } = router.query as { projectId?: string };
+  const q = router.query as { projectId?: string; project_id?: string };
+  const pid =
+    q.projectId ??
+    q.project_id ??
+    (typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("project_id") ?? undefined
+      : undefined);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -198,7 +204,7 @@ export default function ProjectConceptPage() {
   const addUserMessage = async (text: string, topicIdOverride?: string) => {
     const trimmed = text.trim();
     const tid = topicIdOverride || activeTopicId;
-    if (!trimmed || !tid || !projectId) return;
+    if (!trimmed || !tid || !pid) return;
     const userId = `m-${Date.now()}`;
     const nowIso = new Date().toISOString();
     // optimistic append user message
@@ -208,7 +214,7 @@ export default function ProjectConceptPage() {
     ]);
     try {
       setSending(true);
-      const resp = await api<ChatResp>(`/concept/projects/${projectId}/chat`, {
+      const resp = await api<ChatResp>(`/concept/projects/${pid}/chat`, {
         method: "POST",
         body: JSON.stringify({ topic_id: tid, message: trimmed }),
       });
@@ -241,12 +247,12 @@ export default function ProjectConceptPage() {
 
   const onSend = async () => {
     const text = draft.trim();
-    if (!text || !projectId) return;
+    if (!text || !pid) return;
     let tid = activeTopicId;
     try {
       // If no active topic, create a default "General" topic first
       if (!tid) {
-        const data = await api<CreateTopicResp>(`/concept/projects/${projectId}/topics`, {
+        const data = await api<CreateTopicResp>(`/concept/projects/${pid}/topics`, {
           method: "POST",
           body: JSON.stringify({ title: "General" }),
         });
@@ -262,11 +268,11 @@ export default function ProjectConceptPage() {
   };
 
   const onNewTopic = async () => {
-    if (!projectId) return;
+    if (!pid) return;
     const title = window.prompt("Topic title?", "New topic")?.trim();
     if (!title) return;
     try {
-      const data = await api<CreateTopicResp>(`/concept/projects/${projectId}/topics`, {
+      const data = await api<CreateTopicResp>(`/concept/projects/${pid}/topics`, {
         method: "POST",
         body: JSON.stringify({ title }),
       });
@@ -334,23 +340,23 @@ export default function ProjectConceptPage() {
   }
 
   React.useEffect(() => {
-    if (!projectId) return;
+    if (!pid) return;
     let cancelled = false;
     const loadOverview = async () => {
       setLoadingTopics(true);
       setTopicsError(null);
       try {
         // 1) fetch overview
-        let data = await api<OverviewResp>(`/concept/projects/${projectId}/overview`);
+        let data = await api<OverviewResp>(`/concept/projects/${pid}/overview`);
         if (cancelled) return;
         // 2) if no topics, auto-start then re-fetch overview
         if (!data.topics || data.topics.length === 0) {
           try {
             await api<{ ok: boolean }>(`/concept/start`, {
               method: "POST",
-              body: JSON.stringify({ project_id: projectId }),
+              body: JSON.stringify({ project_id: pid }),
             });
-            data = await api<OverviewResp>(`/concept/projects/${projectId}/overview`);
+            data = await api<OverviewResp>(`/concept/projects/${pid}/overview`);
             if (cancelled) return;
           } catch (e) {
             // If start fails, surface error and stop
@@ -388,24 +394,24 @@ export default function ProjectConceptPage() {
     };
     void loadOverview();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [pid]);
 
   // Effect: load chat history when topic changes
   React.useEffect(() => {
-    if (!projectId || !activeTopicId) return;
-    void refreshMessages(projectId, activeTopicId);
-  }, [projectId, activeTopicId]);
+    if (!pid || !activeTopicId) return;
+    void refreshMessages(pid, activeTopicId);
+  }, [pid, activeTopicId]);
 
   React.useEffect(() => {
-    if (!projectId) return;
-    void refreshActions(projectId);
-  }, [projectId, actionsRefreshTick]);
+    if (!pid) return;
+    void refreshActions(pid);
+  }, [pid, actionsRefreshTick]);
 
   React.useEffect(() => {
-    if (!projectId) return;
+    if (!pid) return;
     const id = setInterval(() => setActionsRefreshTick((t) => t + 1), 15000);
     return () => clearInterval(id);
-  }, [projectId]);
+  }, [pid]);
 
   return (
     <div style={layout}>
@@ -413,7 +419,7 @@ export default function ProjectConceptPage() {
       <aside style={col}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
           <span style={pill}>Project</span>
-          <strong style={{ fontSize: 14, color: "#111827" }}>{projectId ?? "…"}</strong>
+          <strong style={{ fontSize: 14, color: "#111827" }}>{pid ?? "…"}</strong>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -449,7 +455,7 @@ export default function ProjectConceptPage() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <a href={`/dashboard`} style={pill}>Back to Dashboard</a>
-            <a href={`/projects/${projectId}`} style={pill}>Project Home</a>
+            <a href={`/projects/${pid}`} style={pill}>Project Home</a>
           </div>
         </header>
         {seedPrompt && (
