@@ -23,13 +23,6 @@ import React, { useMemo, useRef, useState } from "react";
 const errMessage = (err: unknown): string =>
   err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err);
 
-/**
- * Step 4a: UI skeleton only — no API calls yet.
- * Left: Topics list
- * Right: Chat thread + input
- * We'll wire data in 4b.
- */
-
 type Topic = {
   id: string;
   title: string;
@@ -126,11 +119,9 @@ const bubble = (role: ChatMessage["role"]): React.CSSProperties => ({
   whiteSpace: "pre-wrap",
 });
 
-// type GetTopicsResp = { ok: boolean; topics: Topic[] }; // Removed: unused type
 type CreateTopicResp = { ok: boolean; topic: Topic };
 type ChatResp = { ok: boolean; assistant_message: { id?: string; content: string } };
 
-// Fetch historical messages for a topic
 type MessagesListResp = {
   ok: boolean;
   messages: { id: string; role: "user" | "assistant" | "system"; content: string; at?: string }[];
@@ -207,7 +198,6 @@ export default function ProjectConceptPage() {
     if (!trimmed || !tid || !pid) return;
     const userId = `m-${Date.now()}`;
     const nowIso = new Date().toISOString();
-    // optimistic append user message
     setMessages(prev => [
       ...prev,
       { id: userId, role: "user", content: trimmed, at: nowIso, topicId: tid },
@@ -250,7 +240,6 @@ export default function ProjectConceptPage() {
     if (!text || !pid) return;
     let tid = activeTopicId;
     try {
-      // If no active topic, create a default "General" topic first
       if (!tid) {
         const data = await api<CreateTopicResp>(`/concept/projects/${pid}/topics`, {
           method: "POST",
@@ -285,13 +274,11 @@ export default function ProjectConceptPage() {
     }
   };
 
-  // Helper to load chat history for a topic
   async function refreshMessages(pid: string, tid: string) {
     if (!pid || !tid) return;
     const ticket = ++seededLoadRef.current;
     try {
       const data = await api<MessagesListResp>(`/concept/projects/${pid}/topics/${tid}/messages`);
-      // Defensive: ignore out-of-date responses
       if (ticket !== seededLoadRef.current) return;
       const rows = (data.messages || []).map((m, i) => ({
         id: m.id || `hist-${i}`,
@@ -302,12 +289,8 @@ export default function ProjectConceptPage() {
       })) as ChatMessage[];
       setMessages(rows);
     } catch {
-      // If messages endpoint isn't ready yet, don't hard error the UI
-      // We simply show an empty thread and wait for first reply
     }
   }
-
-  // Removed unused function startConceptIfNeeded
 
   async function refreshActions(pid: string) {
     try {
@@ -324,16 +307,13 @@ export default function ProjectConceptPage() {
 
   async function completeAction(actionId: string) {
     try {
-      // optimistic update
       setActions(prev => prev.map(a => (a.id === actionId ? { ...a, status: "completed", completed_at: new Date().toISOString() } : a)));
       await api<ActionUpdateResp>(`/ai/actions/${actionId}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "completed" }),
       });
-      // nudge a refresh in background to stay in sync
       setActionsRefreshTick(t => t + 1);
     } catch (err: unknown) {
-      // revert on error
       setActions(prev => prev.map(a => (a.id === actionId ? { ...a, status: "pending", completed_at: null } : a)));
       setActionsError(`Failed to complete action: ${errMessage(err)}`);
     }
@@ -346,10 +326,8 @@ export default function ProjectConceptPage() {
       setLoadingTopics(true);
       setTopicsError(null);
       try {
-        // 1) fetch overview
         let data = await api<OverviewResp>(`/concept/projects/${pid}/overview`);
         if (cancelled) return;
-        // 2) if no topics, auto-start then re-fetch overview
         if (!data.topics || data.topics.length === 0) {
           try {
             await api<{ ok: boolean }>(`/concept/start`, {
@@ -359,21 +337,19 @@ export default function ProjectConceptPage() {
             data = await api<OverviewResp>(`/concept/projects/${pid}/overview`);
             if (cancelled) return;
           } catch (e) {
-            // If start fails, surface error and stop
             if (!cancelled) setTopicsError(errMessage(e) || "Failed to start concept");
             return;
           }
         }
         const ts = data.topics || [];
         setTopics(ts);
-        // set seed prompt
         setSeedPrompt(data.seed_prompt ?? null);
-        // select first topic if none selected
         if (!activeTopicId && ts.length) {
           setActiveTopicId(ts[0].id);
+          // 🔹 auto-load full message history for first topic
+          await refreshMessages(pid, ts[0].id);
         }
-        // seed first question as assistant message (tie to first topic if available)
-        if (data.first_question) {
+        if (data.first_question && !messages.length) {
           setMessages([
             {
               id: data.first_question.id,
@@ -383,8 +359,6 @@ export default function ProjectConceptPage() {
               topicId: ts.length ? ts[0].id : undefined,
             },
           ]);
-        } else {
-          setMessages([]);
         }
       } catch (err: unknown) {
         if (!cancelled) setTopicsError(errMessage(err) || "Failed to load topics");
@@ -396,7 +370,6 @@ export default function ProjectConceptPage() {
     return () => { cancelled = true; };
   }, [pid]);
 
-  // Effect: load chat history when topic changes
   React.useEffect(() => {
     if (!pid || !activeTopicId) return;
     void refreshMessages(pid, activeTopicId);
@@ -439,7 +412,6 @@ export default function ProjectConceptPage() {
                 aria-pressed={t.id === activeTopicId}
               >
                 <div style={{ fontWeight: 600 }}>{t.title}</div>
-                {/* place for small stats/badges later */}
               </button>
             </li>
           ))}
@@ -504,59 +476,3 @@ export default function ProjectConceptPage() {
                 color: "white",
                 borderRadius: 10,
                 opacity: sending ? 0.7 : 1,
-                cursor: sending ? "progress" : draft.trim() ? "pointer" : "not-allowed",
-              }}
-            >
-              {sending ? "Sending…" : "Send"}
-            </button>
-          </div>
-          {starting && <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>Starting concept…</div>}
-          {startError && <div style={{ marginTop: 6, fontSize: 12, color: "#b91c1c" }}>{startError}</div>}
-        </footer>
-      </main>
-      {hasActionRail && (
-        <aside style={{ borderLeft: "1px solid #eee", padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <h3 style={{ margin: 0, fontSize: 15 }}>Actions</h3>
-            <span style={{ fontSize: 12, color: "#6b7280" }}>{pendingActions.length}</span>
-          </div>
-
-          {loadingActions && <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Loading…</div>}
-          {actionsError && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>{actionsError}</div>}
-
-          <ul style={{ ...list, marginTop: 8 }}>
-            {pendingActions.map(a => (
-              <li key={a.id}>
-                <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff" }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>{a.label}</div>
-                  {a.description ? (
-                    <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 8 }}>{a.description}</div>
-                  ) : null}
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <span style={{ fontSize: 11, color: "#6b7280", border: "1px solid #e5e7eb", borderRadius: 999, padding: "2px 8px" }}>
-                      {a.trigger_type}
-                    </span>
-                    <button
-                      onClick={() => completeAction(a.id)}
-                      style={{
-                        marginLeft: "auto",
-                        padding: "6px 10px",
-                        border: "1px solid #111827",
-                        background: "#111827",
-                        color: "white",
-                        borderRadius: 8,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Complete
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </aside>
-      )}
-    </div>
-  );
-}
