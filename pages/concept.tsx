@@ -85,7 +85,6 @@ export default function ConceptPage() {
       });
       setAnswers(init);
     } catch (e) {
-      // eslint-disable-next-line no-alert
       alert((e as Error).message);
     } finally {
       setLoading(false);
@@ -97,7 +96,6 @@ export default function ConceptPage() {
     // simple required enforcement
     for (const q of questions) {
       if (q.required && !String(answers[q.id] || "").trim()) {
-        // eslint-disable-next-line no-alert
         alert(`Please answer: ${q.text}`);
         return;
       }
@@ -119,7 +117,6 @@ export default function ConceptPage() {
       const data: BriefResponse = await res.json();
       setBrief(data.brief);
     } catch (e) {
-      // eslint-disable-next-line no-alert
       alert((e as Error).message);
     } finally {
       setLoading(false);
