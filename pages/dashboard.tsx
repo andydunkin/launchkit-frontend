@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import RevertOverlay from '../components/RevertOverlay'
+import { getUserId } from '../lib/auth'
+import { useToast } from '../components/Toast'
 
 interface Project {
   id: string
@@ -17,6 +19,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState<boolean>(false)
   const [creating, setCreating] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
+  const { showError } = useToast()
 
   const APPS_DOMAIN = 'launching.stratxi.com' // wildcard domain for user apps
 
@@ -36,7 +39,8 @@ export default function Dashboard() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API}/projects?user_id=demo-user-id`)
+      const userId = await getUserId()
+      const res = await fetch(`${API}/projects?user_id=${userId}`)
       if (!res.ok) throw new Error(`API ${res.status}`)
       const data: Project[] | Project | null = await res.json()
       const list: Project[] = Array.isArray(data) ? data : (data ? [data] : [])
@@ -61,8 +65,9 @@ export default function Dashboard() {
     setCreating(true)
     setError(null)
     const timestamp = Date.now()
+    const userId = await getUserId()
     const newProject = {
-      user_id: 'demo-user-id',
+      user_id: userId,
       name: `app-${timestamp}`,
       subdomain: `app-${timestamp}`,
     }
@@ -80,7 +85,7 @@ export default function Dashboard() {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to create project'
       setError(msg)
-      alert(msg)
+      showError(`Project Creation Failed: ${msg}`)
     } finally {
       setCreating(false)
     }
@@ -168,7 +173,7 @@ export default function Dashboard() {
         })}
       </ul>
 
-      <RevertOverlay message="Project dashboard updated. Revert available." />
+      {/* RevertOverlay removed - will be added back when dashboard is rebuilt */}
     </main>
   )
 }

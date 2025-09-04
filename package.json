@@ -2,13 +2,17 @@
   "name": "launchkit-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p $PORT",
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.55.0",
     "axios": "^1.11.0",
     "framer-motion": "^12.23.12",
     "next": "15.4.5",

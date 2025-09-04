@@ -1,43 +1,94 @@
-// components/RevertOverlay.tsx
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import React from 'react';
 
-export default function RevertOverlay({ message }: { message?: string }) {
-  const [visible, setVisible] = useState(true);
+interface RevertOverlayProps {
+  isVisible: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  title?: string;
+  message?: string;
+}
 
-  if (!visible) return null;
+export default function RevertOverlay({
+  isVisible,
+  onConfirm,
+  onCancel,
+  title = "Confirm Revert",
+  message = "Are you sure you want to revert these changes?"
+}: RevertOverlayProps) {
+  if (!isVisible) return null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 50 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 50 }}
-      transition={{ duration: 0.3 }}
-      className="fixed bottom-4 right-4 bg-white shadow-xl rounded-2xl p-4 border z-50 max-w-xs"
-    >
-      <div className="flex justify-between items-center">
-        <div className="text-sm font-medium text-gray-800">
-          {message || 'Reverted to previous version.'}
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        backgroundColor: 'white',
+        padding: '24px',
+        borderRadius: '8px',
+        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+        maxWidth: '400px',
+        width: '90%'
+      }}>
+        <h3 style={{
+          margin: '0 0 12px 0',
+          fontSize: '18px',
+          fontWeight: '600',
+          color: '#111'
+        }}>
+          {title}
+        </h3>
+        <p style={{
+          margin: '0 0 20px 0',
+          fontSize: '14px',
+          color: '#666',
+          lineHeight: 1.4
+        }}>
+          {message}
+        </p>
+        <div style={{
+          display: 'flex',
+          gap: '12px',
+          justifyContent: 'flex-end'
+        }}>
+          <button
+            onClick={onCancel}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#f3f4f6',
+              color: '#374151',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '14px',
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#ef4444',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '14px',
+              cursor: 'pointer'
+            }}
+          >
+            Revert
+          </button>
         </div>
-        <button
-          onClick={() => setVisible(false)}
-          className="ml-4 text-gray-500 hover:text-gray-700"
-        >
-          ✕
-        </button>
       </div>
-      <div className="mt-2">
-        <a
-          href=""
-          onClick={(e) => {
-            e.preventDefault();
-            window.location.reload();
-          }}
-          className="text-sm text-blue-600 hover:underline"
-        >
-          Refresh to view changes
-        </a>
-      </div>
-    </motion.div>
+    </div>
   );
 }

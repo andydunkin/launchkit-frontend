@@ -1,3 +1,5 @@
+import { SimpleChatInterface } from "../../../components/SimpleChatInterface";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -16,463 +18,243 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return (await res.json()) as T;
 }
+
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
-import React, { useMemo, useRef, useState } from "react";
+import Head from "next/head";
 
-// Helper to safely extract an error message without using `any`
-const errMessage = (err: unknown): string =>
-  err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err);
-
-type Topic = {
-  id: string;
-  title: string;
-  created_at?: string;
-  project_id?: string;
-};
-
-type OverviewResp = {
-  ok: boolean;
-  seed_prompt?: string;
-  topics: Topic[];
-  first_question?: { id: string; content: string };
-};
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  at: string;
-  topicId?: string;
-  assistant?: boolean;
-};
-
-const basePageWrap: React.CSSProperties = {
-  display: "grid",
-  height: "100vh",
-};
-
-const col = {
-  borderRight: "1px solid #eee",
-  padding: "16px",
-} as const;
-
-const rightCol = {
-  padding: "16px",
-  display: "grid",
-  gridTemplateRows: "auto 1fr auto",
-  gap: 12,
-  height: "100%",
-} as const;
-
-const list = {
-  margin: 0,
-  padding: 0,
-  listStyle: "none",
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-} as const;
-
-const topicBtn: React.CSSProperties = {
-  textAlign: "left",
-  border: "1px solid #e5e7eb",
-  borderRadius: 10,
-  padding: "10px 12px",
-  background: "white",
-  cursor: "pointer",
-};
-
-const topicBtnActive: React.CSSProperties = {
-  ...topicBtn,
-  borderColor: "#111827",
-  background: "#f9fafb",
-};
-
-const pill: React.CSSProperties = {
-  fontSize: 12,
-  border: "1px solid #e5e7eb",
-  borderRadius: 999,
-  padding: "2px 8px",
-  color: "#374151",
-  background: "#f9fafb",
-};
-
-const chatWrap: React.CSSProperties = {
-  overflow: "auto",
-  border: "1px solid #eee",
-  borderRadius: 12,
-  padding: 12,
-};
-
-const chatRow: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-  alignItems: "flex-start",
-};
-
-const bubble = (role: ChatMessage["role"]): React.CSSProperties => ({
-  maxWidth: "72ch",
-  padding: "10px 12px",
-  borderRadius: 12,
-  border: "1px solid #e5e7eb",
-  background: role === "user" ? "#eef2ff" : role === "assistant" ? "#f0fdf4" : "#f9fafb",
-  whiteSpace: "pre-wrap",
-});
-
-type CreateTopicResp = { ok: boolean; topic: Topic };
-type ChatResp = { ok: boolean; assistant_message: { id?: string; content: string } };
-
-type MessagesListResp = {
-  ok: boolean;
-  messages: { id: string; role: "user" | "assistant" | "system"; content: string; at?: string }[];
-};
-
-type ProjectAction = {
-  id: string;
-  project_id?: string;
-  topic_id?: string | null;
-  label: string;
-  description?: string | null;
-  trigger_type: "input_form" | "confirm_action" | "auto_commit" | string;
-  payload_schema?: unknown;
-  status: "pending" | "completed" | "skipped" | string;
-  created_at?: string;
-  completed_at?: string | null;
-};
-type ActionsListResp = { ok: boolean; actions: ProjectAction[] };
-type ActionUpdateResp = { ok: boolean; action: ProjectAction };
-
-export default function ProjectConceptPage() {
+export default function ConceptPage() {
   const router = useRouter();
-  const q = router.query as { projectId?: string; project_id?: string };
-  const pid =
-    q.projectId ??
-    q.project_id ??
-    (typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("project_id") ?? undefined
-      : undefined);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const { projectId } = router.query;
+  const pid = projectId as string;
 
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
+  // State management
+  const [seedPrompt, setSeedPrompt] = useState<string>("");
 
-  const [activeTopicId, setActiveTopicId] = useState<string>("");
-  const activeTopic = useMemo(() => topics.find(t => t.id === activeTopicId), [topics, activeTopicId]);
-
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const seededLoadRef = useRef(0);
-  const [actions, setActions] = useState<ProjectAction[]>([]);
-  const [loadingActions, setLoadingActions] = useState(false);
-  const [actionsError, setActionsError] = useState<string | null>(null);
-  const [actionsRefreshTick, setActionsRefreshTick] = useState(0);
-
-  const [draft, setDraft] = useState("");
-
-  const [loadingTopics, setLoadingTopics] = useState(false);
-  const [topicsError, setTopicsError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-
-  const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
-
-  const filtered = useMemo(
-    () => messages.filter(m => !activeTopicId || m.topicId === activeTopicId),
-    [messages, activeTopicId]
-  );
-
-  const pendingActions = useMemo(
-    () => actions.filter(a => a.status === "pending"),
-    [actions]
-  );
-  const hasActionRail = pendingActions.length > 0;
-  const layout = useMemo<React.CSSProperties>(() => {
-    return {
-      ...basePageWrap,
-      gridTemplateColumns: hasActionRail ? "minmax(260px, 340px) 1fr 300px" : "minmax(260px, 340px) 1fr",
-    };
-  }, [hasActionRail]);
-
-  const addUserMessage = async (text: string, topicIdOverride?: string) => {
-    const trimmed = text.trim();
-    const tid = topicIdOverride || activeTopicId;
-    if (!trimmed || !tid || !pid) return;
-    const userId = `m-${Date.now()}`;
-    const nowIso = new Date().toISOString();
-    setMessages(prev => [
-      ...prev,
-      { id: userId, role: "user", content: trimmed, at: nowIso, topicId: tid },
-    ]);
-    try {
-      setSending(true);
-      const resp = await api<ChatResp>(`/concept/projects/${pid}/chat`, {
-        method: "POST",
-        body: JSON.stringify({ topic_id: tid, message: trimmed }),
-      });
-      const aiText = resp?.assistant_message?.content ?? "";
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `${userId}-ai`,
-          role: "assistant",
-          content: aiText || "OK.",
-          at: new Date().toISOString(),
-          topicId: tid,
-        },
-      ]);
-    } catch (err: unknown) {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `${userId}-err`,
-          role: "system",
-          content: `⚠️ Failed to reach AI: ${errMessage(err)}`,
-          at: new Date().toISOString(),
-          topicId: tid,
-        },
-      ]);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const onSend = async () => {
-    const text = draft.trim();
-    if (!text || !pid) return;
-    let tid = activeTopicId;
-    try {
-      if (!tid) {
-        const data = await api<CreateTopicResp>(`/concept/projects/${pid}/topics`, {
-          method: "POST",
-          body: JSON.stringify({ title: "General" }),
-        });
-        tid = data.topic.id;
-        setTopics(prev => [data.topic, ...prev]);
-        setActiveTopicId(tid);
-      }
-      await addUserMessage(text, tid);
-    } finally {
-      setDraft("");
-      inputRef.current?.focus();
-    }
-  };
-
-  const onNewTopic = async () => {
+  // Load project data and check for query parameters on mount
+  useEffect(() => {
     if (!pid) return;
-    const title = window.prompt("Topic title?", "New topic")?.trim();
-    if (!title) return;
-    try {
-      const data = await api<CreateTopicResp>(`/concept/projects/${pid}/topics`, {
-        method: "POST",
-        body: JSON.stringify({ title }),
-      });
-      const nt = data.topic;
-      setTopics(prev => [nt, ...prev]);
-      setActiveTopicId(nt.id);
-      setMessages([]);
-    } catch (err: unknown) {
-      alert(`Failed to create topic: ${errMessage(err)}`);
+    
+    // Check for seed_prompt query parameter first
+    const urlParams = new URLSearchParams(window.location.search);
+    const seedPromptFromQuery = urlParams.get('seed_prompt');
+    
+    if (seedPromptFromQuery) {
+      console.log('📍 Found seed_prompt in URL:', seedPromptFromQuery);
+      setSeedPrompt(decodeURIComponent(seedPromptFromQuery));
+      return; // Use query param instead of loading from project
     }
-  };
-
-  async function refreshMessages(pid: string, tid: string) {
-    if (!pid || !tid) return;
-    const ticket = ++seededLoadRef.current;
-    try {
-      const data = await api<MessagesListResp>(`/concept/projects/${pid}/topics/${tid}/messages`);
-      if (ticket !== seededLoadRef.current) return;
-      const rows = (data.messages || []).map((m, i) => ({
-        id: m.id || `hist-${i}`,
-        role: m.role,
-        content: m.content,
-        at: m.at || new Date().toISOString(),
-        topicId: tid,
-      })) as ChatMessage[];
-      setMessages(rows);
-    } catch {
-    }
-  }
-
-  async function refreshActions(pid: string) {
-    try {
-      setLoadingActions(true);
-      setActionsError(null);
-      const data = await api<ActionsListResp>(`/ai/actions/projects/${pid}`);
-      setActions(data.actions || []);
-    } catch (err: unknown) {
-      setActionsError(errMessage(err));
-    } finally {
-      setLoadingActions(false);
-    }
-  }
-
-  async function completeAction(actionId: string) {
-    try {
-      setActions(prev => prev.map(a => (a.id === actionId ? { ...a, status: "completed", completed_at: new Date().toISOString() } : a)));
-      await api<ActionUpdateResp>(`/ai/actions/${actionId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "completed" }),
-      });
-      setActionsRefreshTick(t => t + 1);
-    } catch (err: unknown) {
-      setActions(prev => prev.map(a => (a.id === actionId ? { ...a, status: "pending", completed_at: null } : a)));
-      setActionsError(`Failed to complete action: ${errMessage(err)}`);
-    }
-  }
-
-  React.useEffect(() => {
-    if (!pid) return;
-    let cancelled = false;
-    const loadOverview = async () => {
-      setLoadingTopics(true);
-      setTopicsError(null);
+    
+    const loadProject = async () => {
       try {
-        let data = await api<OverviewResp>(`/concept/projects/${pid}/overview`);
-        if (cancelled) return;
-        if (!data.topics || data.topics.length === 0) {
+        const project = await api<{
+          ok: boolean;
+          project: {
+            name: string;
+            description?: string;
+            seed_prompt?: string;
+          };
+        }>(`/projects/${pid}`);
+        
+        if (project.ok && project.project.seed_prompt) {
+          setSeedPrompt(project.project.seed_prompt);
+        }
+      } catch (error) {
+        console.error("Failed to load project:", error);
+      }
+    };
+
+    loadProject();
+  }, [pid]);
+
+  // Handle message callback for preview refresh
+  const handleMessage = useCallback((message: string, response: { app_generated?: boolean; app_updated?: boolean; app_url?: string }) => {
+    // Auto-refresh preview when app is generated or updated
+    if (response.app_generated) {
+      console.log("🎉 App generated! Loading live preview...");
+      const appUrl = response.app_url || `https://app-${pid.substring(0, 8)}.launchkit.stratxi.com`;
+      console.log("🔗 Loading preview URL:", appUrl);
+      // Poll the app URL until it's ready, then load in iframe
+      const pollAppReady = async () => {
+        console.log("🔍 Polling app readiness...");
+        let attempts = 0;
+        const maxAttempts = 30; // 5 minutes max (30 * 10s)
+        
+        const checkApp = async (): Promise<boolean> => {
           try {
-            await api<{ ok: boolean }>(`/concept/start`, {
-              method: "POST",
-              body: JSON.stringify({ project_id: pid }),
-            });
-            data = await api<OverviewResp>(`/concept/projects/${pid}/overview`);
-            if (cancelled) return;
-          } catch (e) {
-            if (!cancelled) setTopicsError(errMessage(e) || "Failed to start concept");
+            const response = await fetch(appUrl, { method: 'HEAD', mode: 'no-cors' });
+            return true; // If no error, app is ready
+          } catch {
+            return false;
+          }
+        };
+
+        while (attempts < maxAttempts) {
+          const isReady = await checkApp();
+          if (isReady) {
+            console.log(`✅ App ready after ${attempts * 10} seconds!`);
+            const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+            if (iframe) {
+              iframe.src = appUrl;
+            }
             return;
           }
+          attempts++;
+          console.log(`⏳ App not ready yet (attempt ${attempts}/${maxAttempts}), waiting 10s...`);
+          await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
         }
-        const ts = data.topics || [];
-        setTopics(ts);
-        setSeedPrompt(data.seed_prompt ?? null);
-        if (!activeTopicId && ts.length) {
-          setActiveTopicId(ts[0].id);
-          // 🔹 auto-load full message history for first topic
-          await refreshMessages(pid, ts[0].id);
+        
+        console.log("⚠️ App didn't respond after 5 minutes, loading anyway...");
+        const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+        if (iframe) {
+          iframe.src = appUrl;
         }
-        if (data.first_question && !messages.length) {
-          setMessages([
-            {
-              id: data.first_question.id,
-              role: "assistant",
-              content: data.first_question.content,
-              at: new Date().toISOString(),
-              topicId: ts.length ? ts[0].id : undefined,
-            },
-          ]);
-        }
-      } catch (err: unknown) {
-        if (!cancelled) setTopicsError(errMessage(err) || "Failed to load topics");
-      } finally {
-        if (!cancelled) setLoadingTopics(false);
-      }
-    };
-    void loadOverview();
-    return () => { cancelled = true; };
+      };
+      
+      pollAppReady();
+    } else if (response.app_updated) {
+      console.log("✅ App updated! Refreshing preview...");
+      setTimeout(() => {
+        const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+        if (iframe) iframe.src = iframe.src; // Force refresh
+      }, 2000);
+    }
   }, [pid]);
 
-  React.useEffect(() => {
-    if (!pid || !activeTopicId) return;
-    void refreshMessages(pid, activeTopicId);
-  }, [pid, activeTopicId]);
+  // onSend function removed - using handleMessage callback instead
 
-  React.useEffect(() => {
-    if (!pid) return;
-    void refreshActions(pid);
-  }, [pid, actionsRefreshTick]);
+  // Styles
+  const layout = {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr", // 2 columns: chat, preview
+    height: "100vh",
+    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    padding: "20px",
+    gap: "20px"
+  };
 
-  React.useEffect(() => {
-    if (!pid) return;
-    const id = setInterval(() => setActionsRefreshTick((t) => t + 1), 15000);
-    return () => clearInterval(id);
-  }, [pid]);
+  const rightCol = {
+    display: "flex",
+    flexDirection: "column" as const,
+    padding: "24px",
+    overflow: "auto",
+    background: "rgba(255, 255, 255, 0.95)",
+    borderRadius: "16px",
+    boxShadow: "0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.06)",
+    backdropFilter: "blur(10px)",
+    border: "1px solid rgba(255, 255, 255, 0.2)"
+  };
+
+  const previewCol = {
+    background: "rgba(255, 255, 255, 0.95)",
+    display: "flex",
+    flexDirection: "column" as const,
+    overflow: "hidden",
+    borderRadius: "16px",
+    boxShadow: "0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.06)",
+    backdropFilter: "blur(10px)",
+    border: "1px solid rgba(255, 255, 255, 0.2)"
+  };
+
+  const pill = {
+    display: "inline-block",
+    fontSize: 12,
+    background: "rgba(255, 255, 255, 0.9)",
+    color: "#374151",
+    padding: "8px 16px",
+    borderRadius: 20,
+    textDecoration: "none",
+    border: "1px solid rgba(255, 255, 255, 0.3)",
+    backdropFilter: "blur(10px)",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
+    fontWeight: 500,
+    transition: "all 0.2s ease"
+  };
+
+  if (!pid) {
+    return <div>Loading...</div>;
+  }
 
   return (
-    <div style={layout}>
-      {/* Left: Topics */}
-      <aside style={col}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-          <span style={pill}>Project</span>
-          <strong style={{ fontSize: 14, color: "#111827" }}>{pid ?? "…"}</strong>
-        </div>
+    <>
+      <Head>
+        <title>LaunchKit - App Concept</title>
+      </Head>
+      
+      <div style={layout}>
+        {/* Left: Chat Interface */}
+        <main style={rightCol}>
+          <header style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: 'center' }}>
+              <a href={`/dashboard`} style={pill}>Back to Dashboard</a>
+              <a href={`/projects/${pid}`} style={pill}>Project Home</a>
+            </div>
+          </header>
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 16 }}>Topics</h2>
-          <button onClick={onNewTopic} style={{ ...pill, borderRadius: 8 }}>+ New</button>
-        </div>
+          {/* Use SimpleChatInterface for all interactions - no simulation mode */}
+          <SimpleChatInterface
+            projectId={pid}
+            appConcept={seedPrompt || ""}
+            onMessage={handleMessage}
+          />
+        </main>
 
-        {loadingTopics && <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Loading topics…</div>}
-        {topicsError && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>{topicsError}</div>}
-
-        <ul style={list}>
-          {topics.map(t => (
-            <li key={t.id}>
-              <button
-                onClick={() => setActiveTopicId(t.id)}
-                style={t.id === activeTopicId ? topicBtnActive : topicBtn}
-                aria-pressed={t.id === activeTopicId}
-              >
-                <div style={{ fontWeight: 600 }}>{t.title}</div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </aside>
-
-      {/* Right: Chat */}
-      <main style={rightCol}>
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Topic</div>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>{activeTopic?.title ?? "…"}</div>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <a href={`/dashboard`} style={pill}>Back to Dashboard</a>
-            <a href={`/projects/${pid}`} style={pill}>Project Home</a>
-          </div>
-        </header>
-        {seedPrompt && (
-          <div style={{ fontSize: 13, color: "#6b7280", fontStyle: "italic", margin: "4px 0 10px 0" }}>
-            {seedPrompt}
-          </div>
-        )}
-        <section style={chatWrap} aria-label="chat thread">
-          <div style={{ display: "grid", gap: 12 }}>
-            {filtered.map(m => (
-              <div key={m.id} style={chatRow}>
-                <div style={{ fontSize: 12, color: "#6b7280", width: 72, textAlign: "right" }}>
-                  {m.role === "assistant" ? "AI" : m.role === "user" ? "You" : "Sys"}
-                </div>
-                <div style={bubble(m.role)}>{m.content}</div>
-              </div>
-            ))}
-            {!filtered.length && (
-              <div style={{ color: "#6b7280", fontStyle: "italic" }}>No messages yet for this topic.</div>
-            )}
-          </div>
-        </section>
-
-        <footer>
-          <label htmlFor="draft" style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
-            Your message
-          </label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
-            <textarea
-              id="draft"
-              ref={inputRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              rows={3}
-              placeholder="Describe what you want, ask a question, or make a decision…"
-              style={{ resize: "vertical", border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}
-            />
+        {/* Right: Live Preview */}
+        <aside style={previewCol}>
+          <div style={{ 
+            background: "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)", 
+            borderBottom: "1px solid rgba(255, 255, 255, 0.2)", 
+            padding: "20px 24px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderTopLeftRadius: "16px",
+            borderTopRightRadius: "16px"
+          }}>
+            <h3 style={{ 
+              margin: 0, 
+              fontSize: 16, 
+              fontWeight: 600, 
+              color: "#1e293b",
+              background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              backgroundClip: "text"
+            }}>
+              🚀 Live Preview
+            </h3>
             <button
-              onClick={onSend}
-              disabled={sending || !draft.trim()}
+              onClick={() => {
+                const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+                if (iframe) iframe.src = iframe.src; // Force refresh
+              }}
               style={{
-                alignSelf: "end",
-                padding: "10px 14px",
-                border: "1px solid #111827",
-                background: "#111827",
-                color: "white",
-                borderRadius: 10,
-                opacity: sending ? 0.7 : 1,
+                ...pill,
+                cursor: "pointer",
+                fontSize: 11,
+                padding: "6px 12px",
+                background: "rgba(102, 126, 234, 0.1)",
+                border: "1px solid rgba(102, 126, 234, 0.2)",
+                color: "#667eea"
+              }}
+            >
+              ↻ Refresh
+            </button>
+          </div>
+          
+          <iframe
+            id="preview-iframe"
+            src="data:text/html,<html><body style='font-family:system-ui;text-align:center;padding:60px;background:linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);color:#475569;'><div style='max-width:300px;margin:0 auto;'><div style='font-size:48px;margin-bottom:16px;'>🎨</div><h3 style='color:#334155;margin:0 0 12px 0;'>App Preview</h3><p style='line-height:1.6;margin:0;opacity:0.8;'>Your app will appear here once Claude generates it. Start chatting to bring your idea to life!</p></div></body></html>"
+            style={{
+              width: "100%",
+              height: "100%",
+              border: "none",
+              flex: 1
+            }}
+            title="App Preview"
+          />
+        </aside>
+      </div>
+    </>
+  );
+}
